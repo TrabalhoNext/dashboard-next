@@ -27,8 +27,6 @@ st.markdown(
 # =============================
 # DADOS INICIAIS DE DEMONSTRAÇÃO
 # =============================
-# Esta versão foi preparada para publicação inicial no Streamlit.
-# Depois, ela pode ser conectada aos dados reais do GPS, MQTT e contagem.
 
 PARADAS = [
     {"ordem": 1, "nome": "Terminal Diadema", "lat": -23.682681458564325, "lon": -46.62691332328152},
@@ -46,7 +44,6 @@ PARADAS = [
 
 paradas_df = pd.DataFrame(PARADAS)
 
-# Valores de demonstração
 status_bus = {
     "linha": "290 Diadema - Jabaquara",
     "sentido": "Terminal Diadema → Terminal Jabaquara",
@@ -87,6 +84,7 @@ historico_df = pd.DataFrame([
 # =============================
 # SIDEBAR
 # =============================
+
 st.sidebar.title("Painel de Controle")
 st.sidebar.markdown("Projeto Next Mobilidade")
 
@@ -105,12 +103,14 @@ atualizacao = st.sidebar.slider(
 
 st.sidebar.info(
     "Esta primeira versão está preparada para publicação pública. "
-    "Depois, o painel poderá ser conectado ao GPS real, MQTT e contagem de pessoas."
+    "Depois, o painel poderá ser conectado ao GPS real, MQTT "
+    "e contagem de pessoas."
 )
 
 # =============================
 # TOPO
 # =============================
+
 st.title("🚌 Dashboard Operacional - Next Mobilidade")
 st.caption("Monitoramento da linha, GPS, embarque, desembarque e ocupação do ônibus")
 
@@ -130,12 +130,12 @@ col7, col8 = st.columns(2)
 col7.metric("Sentido", status_bus["sentido"])
 col8.metric("Última atualização", status_bus["horario"])
 
-
 st.markdown("---")
 
 # =============================
 # BLOCO PRINCIPAL
 # =============================
+
 a, b = st.columns([1.3, 1])
 
 with a:
@@ -165,7 +165,10 @@ with a:
         zoom=11.8,
         height=500,
     )
-    fig_mapa.update_layout(mapbox_style="open-street-map", margin=dict(l=0, r=0, t=0, b=0))
+    fig_mapa.update_layout(
+        mapbox_style="open-street-map",
+        margin=dict(l=0, r=0, t=0, b=0),
+    )
     st.plotly_chart(fig_mapa, use_container_width=True)
 
 with b:
@@ -173,7 +176,7 @@ with b:
     st.markdown(f"**Trecho atual:** {status_bus['trecho']}")
     st.markdown(f"**Sentido da viagem:** {status_bus['sentido']}")
     st.markdown(f"**Latitude atual:** {status_bus['lat']}")
-st.markdown(f"**Longitude atual:** {status_bus['lon']}")
+    st.markdown(f"**Longitude atual:** {status_bus['lon']}")
     st.markdown(f"**Modo do painel:** {modo_exibicao}")
     st.markdown(f"**Atualização visual definida:** {atualizacao} s")
 
@@ -191,23 +194,55 @@ st.markdown("---")
 # =============================
 # GRÁFICO PRINCIPAL
 # =============================
+
 st.subheader("Fluxo de embarque, desembarque e lotação por parada")
 
 fig_fluxo = go.Figure()
 fig_fluxo.add_trace(
-    go.Bar(x=operacao_df["Parada"], y=operacao_df["Embarques"], name="Embarques"))
+    go.Bar(
+        x=operacao_df["Parada"],
+        y=operacao_df["Embarques"],
+        name="Embarques"
+    )
+)
 fig_fluxo.add_trace(
-    go.Bar(x=operacao_df["Parada"], y=operacao_df["Desembarques"], name="Desembarques"))
+    go.Bar(
+        x=operacao_df["Parada"],
+        y=operacao_df["Desembarques"],
+        name="Desembarques"
+    )
+)
 fig_fluxo.add_trace(
     go.Scatter(
         x=operacao_df["Parada"],
         y=operacao_df["Lotação após parada"],
         mode="lines+markers",
-        name
+        name="Lotação do ônibus",
+        yaxis="y2",
+    )
+)
+
+fig_fluxo.update_layout(
+    height=480,
+    barmode="group",
+    xaxis_title="Paradas e terminais",
+    yaxis_title="Embarques e desembarques",
+    yaxis2=dict(
+        title="Lotação do ônibus",
+        overlaying="y",
+        side="right",
+        showgrid=False,
+    ),
+)
+
+st.plotly_chart(fig_fluxo, use_container_width=True)
+
+st.markdown("---")
 
 # =============================
 # TABELAS
 # =============================
+
 t1, t2 = st.columns(2)
 
 with t1:
@@ -223,9 +258,10 @@ st.markdown("---")
 # =============================
 # RODAPÉ
 # =============================
+
 st.markdown(
     """
-    **Observação:** esta é a base inicial do dashboard em Streamlit para publicação pública.  
+    **  
     Na próxima etapa, os dados simulados poderão ser substituídos por dados reais vindos do Raspberry Pi 5,
     GPS GY-NEO6MV2, MQTT e do módulo de detecção e contagem de passageiros.
     """
