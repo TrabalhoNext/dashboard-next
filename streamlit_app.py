@@ -10,6 +10,20 @@ st.set_page_config(
     layout="wide",
 )
 
+st.markdown(
+    """
+    <style>
+    div[data-testid="stMetricLabel"] {
+        font-size: 0.95rem !important;
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: 2rem !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # =============================
 # DADOS INICIAIS DE DEMONSTRAÇÃO
 # =============================
@@ -95,17 +109,22 @@ st.sidebar.info(
 st.title("🚌 Dashboard Operacional - Next Mobilidade")
 st.caption("Monitoramento da linha, GPS, embarque, desembarque e ocupação do ônibus")
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2 = st.columns(2)
 col1.metric("Linha", status_bus["linha"])
 col2.metric("Situação", status_bus["situacao"])
+
+col3, col4 = st.columns(2)
 col3.metric("Velocidade", f'{status_bus["velocidade"]:.1f} km/h')
 col4.metric("Passageiros atuais", status_bus["passageiros_atual"])
 
-col5, col6, col7, col8 = st.columns(4)
+col5, col6 = st.columns(2)
 col5.metric("Embarques totais", status_bus["embarques_total"])
 col6.metric("Desembarques totais", status_bus["desembarques_total"])
+
+col7, col8 = st.columns(2)
 col7.metric("Sentido", status_bus["sentido"])
 col8.metric("Última atualização", status_bus["horario"])
+
 
 st.markdown("---")
 
@@ -227,3 +246,14 @@ st.markdown(
     GPS GY-NEO6MV2, MQTT e do módulo de detecção e contagem de passageiros.
     """
 )
+
+
+
+
+
+
+  
+
+
+
+
