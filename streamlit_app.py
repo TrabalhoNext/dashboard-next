@@ -17,7 +17,7 @@ st.markdown(
         font-size: 0.95rem !important;
     }
     div[data-testid="stMetricValue"] {
-        font-size: 2rem !important;
+        font-size: 1.6rem !important;
     }
     </style>
     """,
@@ -71,7 +71,11 @@ operacao_df = pd.DataFrame([
     {"Parada": "Parada Jabaquara 2", "Embarques": 2, "Desembarques": 2, "Lotação após parada": 22},
     {"Parada": "Parada Jabaquara 3", "Embarques": 1, "Desembarques": 3, "Lotação após parada": 20},
     {"Parada": "Parada Jabaquara 4", "Embarques": 2, "Desembarques": 4, "Lotação após parada": 18},
-    {"Parada": "Para = pd.DataFrame([
+    {"Parada": "Parada Jabaquara 5", "Embarques": 1, "Desembarques": 5, "Lotação após parada": 14},
+    {"Parada": "Terminal Jabaquara", "Embarques": 0, "Desembarques": 14, "Lotação após parada": 0},
+])
+
+historico_df = pd.DataFrame([
     {"Horário": "07:10", "Evento": "Saída registrada", "Local": "Terminal Diadema", "Situação": "Em movimento"},
     {"Horário": "07:18", "Evento": "Parada registrada", "Local": "Parada Assembleia", "Situação": "Parado"},
     {"Horário": "07:19", "Evento": "Embarque/Desembarque", "Local": "Parada Assembleia", "Situação": "+4 / -1"},
@@ -119,8 +123,8 @@ col3.metric("Velocidade", f'{status_bus["velocidade"]:.1f} km/h')
 col4.metric("Passageiros atuais", status_bus["passageiros_atual"])
 
 col5, col6 = st.columns(2)
-col5.metric("Embarques totais", status_bus["embarques_total"])
-col6.metric("Desembarques totais", status_bus["desembarques_total"])
+col5.metric("Embarques", status_bus["embarques_total"])
+col6.metric("Desembarques", status_bus["desembarques_total"])
 
 col7, col8 = st.columns(2)
 col7.metric("Sentido", status_bus["sentido"])
@@ -168,7 +172,8 @@ with b:
     st.subheader("Resumo operacional")
     st.markdown(f"**Trecho atual:** {status_bus['trecho']}")
     st.markdown(f"**Sentido da viagem:** {status_bus['sentido']}")
-    st.markdown(f"**Coordenadas atuais:** {status_bus['lat']}, {status_bus['lon']}")
+    st.markdown(f"**Latitude atual:** {status_bus['lat']}")
+st.markdown(f"**Longitude atual:** {status_bus['lon']}")
     st.markdown(f"**Modo do painel:** {modo_exibicao}")
     st.markdown(f"**Atualização visual definida:** {atualizacao} s")
 
@@ -184,43 +189,21 @@ with b:
 st.markdown("---")
 
 # =============================
-# GRÁFICOS
+# GRÁFICO PRINCIPAL
 # =============================
-g1, g2 = st.columns(2)
+st.subheader("Fluxo de embarque, desembarque e lotação por parada")
 
-with g1:
-    st.subheader("Embarques e desembarques por parada")
-    grafico_movimento = operacao_df.melt(
-        id_vars="Parada",
-        value_vars=["Embarques", "Desembarques"],
-        var_name="Tipo",
-        value_name="Quantidade",
-    )
-    fig_bar = px.bar(
-        grafico_movimento,
-        x="Parada",
-        y="Quantidade",
-        color="Tipo",
-        barmode="group",
-        height=430,
-    )
-    st.plotly_chart(fig_bar, use_container_width=True)
-
-with g2:
-    st.subheader("Ocupação do ônibus após cada parada")
-    fig_line = go.Figure()
-    fig_line.add_trace(
-        go.Scatter(
-            x=operacao_df["Parada"],
-            y=operacao_df["Passageiros após parada"],
-            mode="lines+markers",
-            name="Passageiros",
-        )
-    )
-    fig_line.update_layout(height=430, xaxis_title="Parada", yaxis_title="Passageiros")
-    st.plotly_chart(fig_line, use_container_width=True)
-
-st.markdown("---")
+fig_fluxo = go.Figure()
+fig_fluxo.add_trace(
+    go.Bar(x=operacao_df["Parada"], y=operacao_df["Embarques"], name="Embarques"))
+fig_fluxo.add_trace(
+    go.Bar(x=operacao_df["Parada"], y=operacao_df["Desembarques"], name="Desembarques"))
+fig_fluxo.add_trace(
+    go.Scatter(
+        x=operacao_df["Parada"],
+        y=operacao_df["Lotação após parada"],
+        mode="lines+markers",
+        name
 
 # =============================
 # TABELAS
