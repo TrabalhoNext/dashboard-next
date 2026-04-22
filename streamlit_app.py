@@ -15,12 +15,7 @@ st.markdown("""
 .main-title {
     font-size: 2.2rem;
     font-weight: 700;
-    margin-bottom: 0.2rem;
-}
-.sub-title {
-    font-size: 1rem;
-    color: #666;
-    margin-bottom: 1.5rem;
+    margin-bottom: 0.8rem;
 }
 .card {
     background-color: #f8f9fa;
@@ -203,10 +198,6 @@ df_operacional = pd.DataFrame(dados_tabela)
 # TÍTULO
 # =========================
 st.markdown('<div class="main-title">Painel de Controle Next Mobilidade</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="sub-title">Dashboard operacional para monitoramento da linha com dados de GPS, embarque, desembarque, pessoas no ônibus e localização em mapa.</div>',
-    unsafe_allow_html=True
-)
 
 # =========================
 # CARDS SUPERIORES
@@ -276,16 +267,16 @@ with col7:
 with col8:
     st.markdown(f"""
     <div class="card">
-        <div class="card-title">Embarque</div>
-        <div class="card-value">{status_bus["embarque"]}</div>
+        <div class="card-title">Fluxo de passageiros</div>
+        <div class="card-value">Embarque: {status_bus["embarque"]}<br>Desembarque: {status_bus["desembarque"]}</div>
     </div>
     """, unsafe_allow_html=True)
 
 with col9:
     st.markdown(f"""
     <div class="card">
-        <div class="card-title">Desembarque / Pessoas no ônibus</div>
-        <div class="card-value">{status_bus["desembarque"]} / {status_bus["pessoas_onibus"]}</div>
+        <div class="card-title">Pessoas no ônibus</div>
+        <div class="card-value">{status_bus["pessoas_onibus"]}</div>
     </div>
     """, unsafe_allow_html=True)
 
