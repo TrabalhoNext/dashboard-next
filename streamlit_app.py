@@ -10,9 +10,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# =========================
-# ESTILO VISUAL
-# =========================
 st.markdown("""
 <style>
 .main-title {
@@ -40,7 +37,7 @@ st.markdown("""
     font-weight: 600;
 }
 .card-value {
-    font-size: 1.25rem;
+    font-size: 1.20rem;
     font-weight: 700;
     color: #111;
     line-height: 1.35;
@@ -60,33 +57,35 @@ div[data-testid="stDataFrame"] {
 """, unsafe_allow_html=True)
 
 # =========================
-# DADOS DE DEMONSTRAÇÃO
+# PARADAS OFICIAIS DA LINHA
 # =========================
-
 PARADAS = [
     {"ordem": 1, "nome": "Terminal Diadema", "lat": -23.682681458564325, "lon": -46.62691332328152},
     {"ordem": 2, "nome": "Parada Assembleia", "lat": -23.67697409771605, "lon": -46.627793033156586},
     {"ordem": 3, "nome": "Parada Divisa", "lat": -23.673551659194004, "lon": -46.63089933449298},
     {"ordem": 4, "nome": "Parada Vila Clara", "lat": -23.670446876785558, "lon": -46.63259010672355},
-    {"ordem": 5, "nome": "Parada Cupecê", "lat": -23.66588383290862, "lon": -46.63728898894579},
-    {"ordem": 6, "nome": "Parada Jabaquara 1", "lat": -23.65519735436502, "lon": -46.6418460739921},
-    {"ordem": 7, "nome": "Parada Jabaquara 2", "lat": -23.65216223193791, "lon": -46.64074047186951},
-    {"ordem": 8, "nome": "Parada Jabaquara 3", "lat": -23.649063115462504, "lon": -46.63955850332983},
-    {"ordem": 9, "nome": "Parada Jabaquara 4", "lat": -23.64631977831234, "lon": -46.63850552722162},
-    {"ordem": 10, "nome": "Parada Jabaquara 5", "lat": -23.643481093849828, "lon": -46.63738435364447},
-    {"ordem": 11, "nome": "Terminal Jabaquara", "lat": -23.640436093181735, "lon": -46.63617672844406},
+    {"ordem": 5, "nome": "Parada Bom Clima", "lat": -23.669120531442708, "lon": -46.63486429031358},
+    {"ordem": 6, "nome": "Parada São José", "lat": -23.664882066923965, "lon": -46.63779830145058},
+    {"ordem": 7, "nome": "Parada Americanópolis", "lat": -23.66095067269106, "lon": -46.637240408622645},
+    {"ordem": 8, "nome": "Parada Faccini", "lat": -23.656897096071692, "lon": -46.63611395876546},
+    {"ordem": 9, "nome": "Parada Encontro", "lat": -23.652614165456484, "lon": -46.63710571915031},
+    {"ordem": 10, "nome": "Parada Cidade Vargas", "lat": -23.648791349310596, "lon": -46.64064538509645},
+    {"ordem": 11, "nome": "Terminal Jabaquara", "lat": -23.646183664190886, "lon": -46.639878302287805},
 ]
 
 paradas_df = pd.DataFrame(PARADAS)
 
+# =========================
+# DADOS DE DEMONSTRAÇÃO
+# =========================
 status_bus = {
     "linha": "290 Diadema - Jabaquara",
-    "parada_atual": "Parada Cupecê",
+    "parada_atual": "Parada Americanópolis",
     "sentido": "Terminal Diadema → Terminal Jabaquara",
-    "trecho": "Parada Cupecê → Parada Jabaquara 1",
+    "trecho": "Parada Americanópolis → Parada Faccini",
     "horario": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-    "latitude": -23.660900,
-    "longitude": -46.640200,
+    "latitude": -23.66095067269106,
+    "longitude": -46.637240408622645,
     "embarque": 6,
     "desembarque": 1,
     "pessoas_onibus": 23,
@@ -129,70 +128,70 @@ dados_tabela = [
         "Parada/Terminal": "Parada Vila Clara",
         "Horário": "07:34:00",
         "Situação": "Parado",
-        "Trecho": "Parada Vila Clara → Parada Cupecê",
+        "Trecho": "Parada Vila Clara → Parada Bom Clima",
         "Embarque": 5,
         "Desembarque": 3,
         "Pessoas no ônibus": 18
     },
     {
         "Ordem": 5,
-        "Parada/Terminal": "Parada Cupecê",
-        "Horário": "07:40:00",
+        "Parada/Terminal": "Parada Bom Clima",
+        "Horário": "07:38:00",
         "Situação": "Parado",
-        "Trecho": "Parada Cupecê → Parada Jabaquara 1",
+        "Trecho": "Parada Bom Clima → Parada São José",
+        "Embarque": 3,
+        "Desembarque": 1,
+        "Pessoas no ônibus": 20
+    },
+    {
+        "Ordem": 6,
+        "Parada/Terminal": "Parada São José",
+        "Horário": "07:42:00",
+        "Situação": "Parado",
+        "Trecho": "Parada São José → Parada Americanópolis",
+        "Embarque": 2,
+        "Desembarque": 1,
+        "Pessoas no ônibus": 21
+    },
+    {
+        "Ordem": 7,
+        "Parada/Terminal": "Parada Americanópolis",
+        "Horário": "07:46:00",
+        "Situação": "Parado",
+        "Trecho": "Parada Americanópolis → Parada Faccini",
         "Embarque": 6,
         "Desembarque": 1,
         "Pessoas no ônibus": 23
     },
     {
-        "Ordem": 6,
-        "Parada/Terminal": "Parada Jabaquara 1",
-        "Horário": "07:48:00",
+        "Ordem": 8,
+        "Parada/Terminal": "Parada Faccini",
+        "Horário": "07:52:00",
         "Situação": "Parado",
-        "Trecho": "Parada Jabaquara 1 → Parada Jabaquara 2",
+        "Trecho": "Parada Faccini → Parada Encontro",
         "Embarque": 3,
         "Desembarque": 4,
         "Pessoas no ônibus": 22
     },
     {
-        "Ordem": 7,
-        "Parada/Terminal": "Parada Jabaquara 2",
-        "Horário": "07:52:00",
-        "Situação": "Parado",
-        "Trecho": "Parada Jabaquara 2 → Parada Jabaquara 3",
-        "Embarque": 2,
-        "Desembarque": 2,
-        "Pessoas no ônibus": 22
-    },
-    {
-        "Ordem": 8,
-        "Parada/Terminal": "Parada Jabaquara 3",
-        "Horário": "07:56:00",
-        "Situação": "Parado",
-        "Trecho": "Parada Jabaquara 3 → Parada Jabaquara 4",
-        "Embarque": 1,
-        "Desembarque": 3,
-        "Pessoas no ônibus": 20
-    },
-    {
         "Ordem": 9,
-        "Parada/Terminal": "Parada Jabaquara 4",
-        "Horário": "08:00:00",
+        "Parada/Terminal": "Parada Encontro",
+        "Horário": "07:58:00",
         "Situação": "Parado",
-        "Trecho": "Parada Jabaquara 4 → Parada Jabaquara 5",
+        "Trecho": "Parada Encontro → Parada Cidade Vargas",
         "Embarque": 2,
-        "Desembarque": 4,
-        "Pessoas no ônibus": 18
+        "Desembarque": 3,
+        "Pessoas no ônibus": 21
     },
     {
         "Ordem": 10,
-        "Parada/Terminal": "Parada Jabaquara 5",
+        "Parada/Terminal": "Parada Cidade Vargas",
         "Horário": "08:05:00",
         "Situação": "Parado",
-        "Trecho": "Parada Jabaquara 5 → Terminal Jabaquara",
+        "Trecho": "Parada Cidade Vargas → Terminal Jabaquara",
         "Embarque": 1,
-        "Desembarque": 5,
-        "Pessoas no ônibus": 14
+        "Desembarque": 6,
+        "Pessoas no ônibus": 16
     },
     {
         "Ordem": 11,
@@ -201,7 +200,7 @@ dados_tabela = [
         "Situação": "Parado",
         "Trecho": "Terminal Jabaquara",
         "Embarque": 0,
-        "Desembarque": 14,
+        "Desembarque": 16,
         "Pessoas no ônibus": 0
     }
 ]
