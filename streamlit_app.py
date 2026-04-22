@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
 from datetime import datetime
 
 st.set_page_config(
@@ -38,7 +40,7 @@ st.markdown("""
     font-weight: 600;
 }
 .card-value {
-    font-size: 1.35rem;
+    font-size: 1.25rem;
     font-weight: 700;
     color: #111;
     line-height: 1.35;
@@ -60,25 +62,41 @@ div[data-testid="stDataFrame"] {
 # =========================
 # DADOS DE DEMONSTRAÇÃO
 # =========================
+
+PARADAS = [
+    {"ordem": 1, "nome": "Terminal Diadema", "lat": -23.682681458564325, "lon": -46.62691332328152},
+    {"ordem": 2, "nome": "Parada Assembleia", "lat": -23.67697409771605, "lon": -46.627793033156586},
+    {"ordem": 3, "nome": "Parada Divisa", "lat": -23.673551659194004, "lon": -46.63089933449298},
+    {"ordem": 4, "nome": "Parada Vila Clara", "lat": -23.670446876785558, "lon": -46.63259010672355},
+    {"ordem": 5, "nome": "Parada Cupecê", "lat": -23.66588383290862, "lon": -46.63728898894579},
+    {"ordem": 6, "nome": "Parada Jabaquara 1", "lat": -23.65519735436502, "lon": -46.6418460739921},
+    {"ordem": 7, "nome": "Parada Jabaquara 2", "lat": -23.65216223193791, "lon": -46.64074047186951},
+    {"ordem": 8, "nome": "Parada Jabaquara 3", "lat": -23.649063115462504, "lon": -46.63955850332983},
+    {"ordem": 9, "nome": "Parada Jabaquara 4", "lat": -23.64631977831234, "lon": -46.63850552722162},
+    {"ordem": 10, "nome": "Parada Jabaquara 5", "lat": -23.643481093849828, "lon": -46.63738435364447},
+    {"ordem": 11, "nome": "Terminal Jabaquara", "lat": -23.640436093181735, "lon": -46.63617672844406},
+]
+
+paradas_df = pd.DataFrame(PARADAS)
+
 status_bus = {
     "linha": "290 Diadema - Jabaquara",
     "parada_atual": "Parada Cupecê",
     "sentido": "Terminal Diadema → Terminal Jabaquara",
     "trecho": "Parada Cupecê → Parada Jabaquara 1",
     "horario": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-    "latitude": "-23.660900",
-    "longitude": "-46.640200",
+    "latitude": -23.660900,
+    "longitude": -46.640200,
     "embarque": 6,
     "desembarque": 1,
     "pessoas_onibus": 23,
+    "situacao": "Parado"
 }
 
 dados_tabela = [
     {
         "Ordem": 1,
         "Parada/Terminal": "Terminal Diadema",
-        "Latitude": -23.682681458564325,
-        "Longitude": -46.62691332328152,
         "Horário": "07:10:00",
         "Situação": "Parado",
         "Trecho": "Terminal Diadema → Parada Assembleia",
@@ -89,8 +107,6 @@ dados_tabela = [
     {
         "Ordem": 2,
         "Parada/Terminal": "Parada Assembleia",
-        "Latitude": -23.67697409771605,
-        "Longitude": -46.627793033156586,
         "Horário": "07:18:00",
         "Situação": "Parado",
         "Trecho": "Parada Assembleia → Parada Divisa",
@@ -101,8 +117,6 @@ dados_tabela = [
     {
         "Ordem": 3,
         "Parada/Terminal": "Parada Divisa",
-        "Latitude": -23.673551659194004,
-        "Longitude": -46.63089933449298,
         "Horário": "07:28:00",
         "Situação": "Parado",
         "Trecho": "Parada Divisa → Parada Vila Clara",
@@ -113,8 +127,6 @@ dados_tabela = [
     {
         "Ordem": 4,
         "Parada/Terminal": "Parada Vila Clara",
-        "Latitude": -23.670446876785558,
-        "Longitude": -46.63259010672355,
         "Horário": "07:34:00",
         "Situação": "Parado",
         "Trecho": "Parada Vila Clara → Parada Cupecê",
@@ -125,8 +137,6 @@ dados_tabela = [
     {
         "Ordem": 5,
         "Parada/Terminal": "Parada Cupecê",
-        "Latitude": -23.66588383290862,
-        "Longitude": -46.63728898894579,
         "Horário": "07:40:00",
         "Situação": "Parado",
         "Trecho": "Parada Cupecê → Parada Jabaquara 1",
@@ -137,8 +147,6 @@ dados_tabela = [
     {
         "Ordem": 6,
         "Parada/Terminal": "Parada Jabaquara 1",
-        "Latitude": -23.65519735436502,
-        "Longitude": -46.6418460739921,
         "Horário": "07:48:00",
         "Situação": "Parado",
         "Trecho": "Parada Jabaquara 1 → Parada Jabaquara 2",
@@ -149,8 +157,6 @@ dados_tabela = [
     {
         "Ordem": 7,
         "Parada/Terminal": "Parada Jabaquara 2",
-        "Latitude": -23.65216223193791,
-        "Longitude": -46.64074047186951,
         "Horário": "07:52:00",
         "Situação": "Parado",
         "Trecho": "Parada Jabaquara 2 → Parada Jabaquara 3",
@@ -161,8 +167,6 @@ dados_tabela = [
     {
         "Ordem": 8,
         "Parada/Terminal": "Parada Jabaquara 3",
-        "Latitude": -23.649063115462504,
-        "Longitude": -46.63955850332983,
         "Horário": "07:56:00",
         "Situação": "Parado",
         "Trecho": "Parada Jabaquara 3 → Parada Jabaquara 4",
@@ -173,8 +177,6 @@ dados_tabela = [
     {
         "Ordem": 9,
         "Parada/Terminal": "Parada Jabaquara 4",
-        "Latitude": -23.64631977831234,
-        "Longitude": -46.63850552722162,
         "Horário": "08:00:00",
         "Situação": "Parado",
         "Trecho": "Parada Jabaquara 4 → Parada Jabaquara 5",
@@ -185,8 +187,6 @@ dados_tabela = [
     {
         "Ordem": 10,
         "Parada/Terminal": "Parada Jabaquara 5",
-        "Latitude": -23.643481093849828,
-        "Longitude": -46.63738435364447,
         "Horário": "08:05:00",
         "Situação": "Parado",
         "Trecho": "Parada Jabaquara 5 → Terminal Jabaquara",
@@ -197,15 +197,13 @@ dados_tabela = [
     {
         "Ordem": 11,
         "Parada/Terminal": "Terminal Jabaquara",
-        "Latitude": -23.640436093181735,
-        "Longitude": -46.63617672844406,
         "Horário": "08:12:00",
         "Situação": "Parado",
         "Trecho": "Terminal Jabaquara",
         "Embarque": 0,
         "Desembarque": 14,
         "Pessoas no ônibus": 0
-    },
+    }
 ]
 
 df_operacional = pd.DataFrame(dados_tabela)
@@ -215,7 +213,7 @@ df_operacional = pd.DataFrame(dados_tabela)
 # =========================
 st.markdown('<div class="main-title">Painel de Controle Next Mobilidade</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="sub-title">Dashboard operacional para monitoramento da linha com dados de GPS, embarque, desembarque e pessoas no ônibus.</div>',
+    '<div class="sub-title">Dashboard operacional para monitoramento da linha com dados de GPS, embarque, desembarque, pessoas no ônibus e localização em mapa.</div>',
     unsafe_allow_html=True
 )
 
@@ -270,7 +268,7 @@ with col6:
     st.markdown(f"""
     <div class="card">
         <div class="card-title">Localização</div>
-        <div class="card-value">Lat: {status_bus["latitude"]}<br>Lon: {status_bus["longitude"]}</div>
+        <div class="card-value">Latitude: {status_bus["latitude"]}<br>Longitude: {status_bus["longitude"]}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -301,7 +299,94 @@ with col9:
     """, unsafe_allow_html=True)
 
 # =========================
+# MAPA + GRÁFICO
+# =========================
+m1, m2 = st.columns(2)
+
+with m1:
+    st.markdown('<div class="section-title">Mapa com localização do ônibus</div>', unsafe_allow_html=True)
+
+    mapa_df = pd.concat(
+        [
+            paradas_df[["nome", "lat", "lon"]].assign(tipo="Paradas"),
+            pd.DataFrame([
+                {
+                    "nome": "Ônibus em operação",
+                    "lat": status_bus["latitude"],
+                    "lon": status_bus["longitude"],
+                    "tipo": "Ônibus"
+                }
+            ])
+        ],
+        ignore_index=True
+    )
+
+    fig_mapa = px.scatter_mapbox(
+        mapa_df,
+        lat="lat",
+        lon="lon",
+        hover_name="nome",
+        color="tipo",
+        zoom=11.8,
+        height=500
+    )
+    fig_mapa.update_layout(
+        mapbox_style="open-street-map",
+        margin=dict(l=0, r=0, t=0, b=0)
+    )
+    st.plotly_chart(fig_mapa, use_container_width=True)
+
+with m2:
+    st.markdown('<div class="section-title">Fluxo de embarque, desembarque e lotação</div>', unsafe_allow_html=True)
+
+    fig_fluxo = go.Figure()
+    fig_fluxo.add_trace(
+        go.Bar(
+            x=df_operacional["Parada/Terminal"],
+            y=df_operacional["Embarque"],
+            name="Embarque"
+        )
+    )
+    fig_fluxo.add_trace(
+        go.Bar(
+            x=df_operacional["Parada/Terminal"],
+            y=df_operacional["Desembarque"],
+            name="Desembarque"
+        )
+    )
+    fig_fluxo.add_trace(
+        go.Scatter(
+            x=df_operacional["Parada/Terminal"],
+            y=df_operacional["Pessoas no ônibus"],
+            mode="lines+markers",
+            name="Pessoas no ônibus",
+            yaxis="y2"
+        )
+    )
+
+    fig_fluxo.update_layout(
+        height=500,
+        barmode="group",
+        xaxis_title="Paradas e terminais",
+        yaxis_title="Embarque e desembarque",
+        yaxis2=dict(
+            title="Pessoas no ônibus",
+            overlaying="y",
+            side="right",
+            showgrid=False
+        ),
+        margin=dict(l=20, r=20, t=20, b=20)
+    )
+
+    st.plotly_chart(fig_fluxo, use_container_width=True)
+
+# =========================
 # TABELA OPERACIONAL
 # =========================
 st.markdown('<div class="section-title">Tabela operacional por parada</div>', unsafe_allow_html=True)
-st.dataframe(df_operacional, use_container_width=True, hide_index=True)
+
+st.dataframe(
+    df_operacional,
+    use_container_width=True,
+    hide_index=True
+)
