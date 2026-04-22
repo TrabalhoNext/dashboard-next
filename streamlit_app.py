@@ -62,15 +62,16 @@ status_bus = {
 }
 
 operacao_df = pd.DataFrame([
-    {"Parada": "Terminal Diadema", "Embarques": 8, "Desembarques": 0, "Passageiros após parada": 8},
-    {"Parada": "Parada Assembleia", "Embarques": 4, "Desembarques": 1, "Passageiros após parada": 11},
-    {"Parada": "Parada Divisa", "Embarques": 7, "Desembarques": 2, "Passageiros após parada": 16},
-    {"Parada": "Parada Vila Clara", "Embarques": 5, "Desembarques": 3, "Passageiros após parada": 18},
-    {"Parada": "Parada Cupecê", "Embarques": 6, "Desembarques": 1, "Passageiros após parada": 23},
-    {"Parada": "Parada Jabaquara 1", "Embarques": 3, "Desembarques": 4, "Passageiros após parada": 22},
-])
-
-historico_df = pd.DataFrame([
+    {"Parada": "Terminal Diadema", "Embarques": 8, "Desembarques": 0, "Lotação após parada": 8},
+    {"Parada": "Parada Assembleia", "Embarques": 4, "Desembarques": 1, "Lotação após parada": 11},
+    {"Parada": "Parada Divisa", "Embarques": 7, "Desembarques": 2, "Lotação após parada": 16},
+    {"Parada": "Parada Vila Clara", "Embarques": 5, "Desembarques": 3, "Lotação após parada": 18},
+    {"Parada": "Parada Cupecê", "Embarques": 6, "Desembarques": 1, "Lotação após parada": 23},
+    {"Parada": "Parada Jabaquara 1", "Embarques": 3, "Desembarques": 4, "Lotação após parada": 22},
+    {"Parada": "Parada Jabaquara 2", "Embarques": 2, "Desembarques": 2, "Lotação após parada": 22},
+    {"Parada": "Parada Jabaquara 3", "Embarques": 1, "Desembarques": 3, "Lotação após parada": 20},
+    {"Parada": "Parada Jabaquara 4", "Embarques": 2, "Desembarques": 4, "Lotação após parada": 18},
+    {"Parada": "Para = pd.DataFrame([
     {"Horário": "07:10", "Evento": "Saída registrada", "Local": "Terminal Diadema", "Situação": "Em movimento"},
     {"Horário": "07:18", "Evento": "Parada registrada", "Local": "Parada Assembleia", "Situação": "Parado"},
     {"Horário": "07:19", "Evento": "Embarque/Desembarque", "Local": "Parada Assembleia", "Situação": "+4 / -1"},
@@ -246,14 +247,3 @@ st.markdown(
     GPS GY-NEO6MV2, MQTT e do módulo de detecção e contagem de passageiros.
     """
 )
-
-
-
-
-
-
-  
-
-
-
-
