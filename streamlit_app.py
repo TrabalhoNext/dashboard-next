@@ -86,11 +86,14 @@ status_bus = {
     "horario": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
     "latitude": -23.66095067269106,
     "longitude": -46.637240408622645,
+    "velocidade": 6.2,
     "embarque": 6,
     "desembarque": 1,
     "pessoas_onibus": 23,
-    "situacao": "Parado"
+    "situacao": "Em movimento"
 }
+
+parada_exibida = "Em rota" if status_bus["velocidade"] > 5 else status_bus["parada_atual"]
 
 dados_tabela = [
     {
@@ -98,7 +101,6 @@ dados_tabela = [
         "Parada/Terminal": "Terminal Diadema",
         "Horário": "07:10:00",
         "Situação": "Parado",
-        "Trecho": "Terminal Diadema → Parada Assembleia",
         "Embarque": 8,
         "Desembarque": 0,
         "Pessoas no ônibus": 8
@@ -108,7 +110,6 @@ dados_tabela = [
         "Parada/Terminal": "Parada Assembleia",
         "Horário": "07:18:00",
         "Situação": "Parado",
-        "Trecho": "Parada Assembleia → Parada Divisa",
         "Embarque": 4,
         "Desembarque": 1,
         "Pessoas no ônibus": 11
@@ -118,7 +119,6 @@ dados_tabela = [
         "Parada/Terminal": "Parada Divisa",
         "Horário": "07:28:00",
         "Situação": "Parado",
-        "Trecho": "Parada Divisa → Parada Vila Clara",
         "Embarque": 7,
         "Desembarque": 2,
         "Pessoas no ônibus": 16
@@ -128,7 +128,6 @@ dados_tabela = [
         "Parada/Terminal": "Parada Vila Clara",
         "Horário": "07:34:00",
         "Situação": "Parado",
-        "Trecho": "Parada Vila Clara → Parada Bom Clima",
         "Embarque": 5,
         "Desembarque": 3,
         "Pessoas no ônibus": 18
@@ -138,7 +137,6 @@ dados_tabela = [
         "Parada/Terminal": "Parada Bom Clima",
         "Horário": "07:38:00",
         "Situação": "Parado",
-        "Trecho": "Parada Bom Clima → Parada São José",
         "Embarque": 3,
         "Desembarque": 1,
         "Pessoas no ônibus": 20
@@ -148,7 +146,6 @@ dados_tabela = [
         "Parada/Terminal": "Parada São José",
         "Horário": "07:42:00",
         "Situação": "Parado",
-        "Trecho": "Parada São José → Parada Americanópolis",
         "Embarque": 2,
         "Desembarque": 1,
         "Pessoas no ônibus": 21
@@ -158,7 +155,6 @@ dados_tabela = [
         "Parada/Terminal": "Parada Americanópolis",
         "Horário": "07:46:00",
         "Situação": "Parado",
-        "Trecho": "Parada Americanópolis → Parada Faccini",
         "Embarque": 6,
         "Desembarque": 1,
         "Pessoas no ônibus": 23
@@ -168,7 +164,6 @@ dados_tabela = [
         "Parada/Terminal": "Parada Faccini",
         "Horário": "07:52:00",
         "Situação": "Parado",
-        "Trecho": "Parada Faccini → Parada Encontro",
         "Embarque": 3,
         "Desembarque": 4,
         "Pessoas no ônibus": 22
@@ -178,7 +173,6 @@ dados_tabela = [
         "Parada/Terminal": "Parada Encontro",
         "Horário": "07:58:00",
         "Situação": "Parado",
-        "Trecho": "Parada Encontro → Parada Cidade Vargas",
         "Embarque": 2,
         "Desembarque": 3,
         "Pessoas no ônibus": 21
@@ -188,7 +182,6 @@ dados_tabela = [
         "Parada/Terminal": "Parada Cidade Vargas",
         "Horário": "08:05:00",
         "Situação": "Parado",
-        "Trecho": "Parada Cidade Vargas → Terminal Jabaquara",
         "Embarque": 1,
         "Desembarque": 6,
         "Pessoas no ônibus": 16
@@ -198,7 +191,6 @@ dados_tabela = [
         "Parada/Terminal": "Terminal Jabaquara",
         "Horário": "08:12:00",
         "Situação": "Parado",
-        "Trecho": "Terminal Jabaquara",
         "Embarque": 0,
         "Desembarque": 16,
         "Pessoas no ônibus": 0
@@ -233,7 +225,7 @@ with col2:
     st.markdown(f"""
     <div class="card">
         <div class="card-title">Parada atual</div>
-        <div class="card-value">{status_bus["parada_atual"]}</div>
+        <div class="card-value">{parada_exibida}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -276,26 +268,32 @@ col7, col8, col9 = st.columns(3)
 with col7:
     st.markdown(f"""
     <div class="card">
-        <div class="card-title">Embarque</div>
-        <div class="card-value">{status_bus["embarque"]}</div>
+        <div class="card-title">Velocidade</div>
+        <div class="card-value">{status_bus["velocidade"]:.1f} km/h</div>
     </div>
     """, unsafe_allow_html=True)
 
 with col8:
     st.markdown(f"""
     <div class="card">
-        <div class="card-title">Desembarque</div>
-        <div class="card-value">{status_bus["desembarque"]}</div>
+        <div class="card-title">Embarque</div>
+        <div class="card-value">{status_bus["embarque"]}</div>
     </div>
     """, unsafe_allow_html=True)
 
 with col9:
     st.markdown(f"""
     <div class="card">
-        <div class="card-title">Pessoas no ônibus</div>
-        <div class="card-value">{status_bus["pessoas_onibus"]}</div>
+        <div class="card-title">Desembarque / Pessoas no ônibus</div>
+        <div class="card-value">{status_bus["desembarque"]} / {status_bus["pessoas_onibus"]}</div>
     </div>
     """, unsafe_allow_html=True)
+
+# =========================
+# TABELA OPERACIONAL
+# =========================
+st.markdown('<div class="section-title">Tabela operacional por parada</div>', unsafe_allow_html=True)
+st.dataframe(df_operacional, use_container_width=True, hide_index=True)
 
 # =========================
 # MAPA + GRÁFICO
@@ -366,7 +364,13 @@ with m2:
     fig_fluxo.update_layout(
         height=500,
         barmode="group",
-        xaxis_title="Paradas e terminais",
+        hovermode="x unified",
+        xaxis=dict(
+            title="Paradas e terminais",
+            tickangle=-35,
+            categoryorder="array",
+            categoryarray=df_operacional["Parada/Terminal"].tolist()
+        ),
         yaxis_title="Embarque e desembarque",
         yaxis2=dict(
             title="Pessoas no ônibus",
@@ -374,18 +378,8 @@ with m2:
             side="right",
             showgrid=False
         ),
-        margin=dict(l=20, r=20, t=20, b=20)
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=20, r=20, t=40, b=80)
     )
 
     st.plotly_chart(fig_fluxo, use_container_width=True)
-
-# =========================
-# TABELA OPERACIONAL
-# =========================
-st.markdown('<div class="section-title">Tabela operacional por parada</div>', unsafe_allow_html=True)
-
-st.dataframe(
-    df_operacional,
-    use_container_width=True,
-    hide_index=True
-)
