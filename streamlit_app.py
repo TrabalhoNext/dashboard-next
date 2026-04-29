@@ -19,26 +19,21 @@ st.set_page_config(
     layout="wide"
 )
 
-# Atualiza o dashboard automaticamente a cada 3 segundos
-st_autorefresh(interval=3000, key="atualizacao_mqtt")
+# Atualização automática do painel
+st_autorefresh(interval=3000, key="atualizacao_dashboard")
 
 
 # =========================
-# CONFIGURAÇÃO MQTT
+# CONFIGURAÇÃO INTERNA MQTT
 # =========================
-# O Raspberry publica no mesmo broker pela porta 1883.
-# O Streamlit lê pelo WebSocket na porta 8000.
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_PORT = 8000
 MQTT_TOPIC = "next/linha290/onibus01/gps"
 MQTT_WEBSOCKET_PATH = "/mqtt"
 
 
-def ler_dados_mqtt():
-    resultado = {
-        "payload": None,
-        "erro": None
-    }
+def ler_dados_reais():
+    resultado = {"payload": None}
 
     def on_connect(client, userdata, flags, reason_code, properties=None):
         client.subscribe(MQTT_TOPIC)
@@ -46,7 +41,7 @@ def ler_dados_mqtt():
     def on_message(client, userdata, msg):
         resultado["payload"] = msg.payload.decode("utf-8")
 
-    client_id = f"streamlit_next_{int(time.time() * 1000)}"
+    client_id = f"dashboard_next_{int(time.time() * 1000)}"
 
     try:
         try:
@@ -71,19 +66,19 @@ def ler_dados_mqtt():
 
         inicio = time.time()
 
-        while resultado["payload"] is None and time.time() - inicio < 5:
+        while resultado["payload"] is None and time.time() - inicio < 4:
             time.sleep(0.1)
 
         client.loop_stop()
         client.disconnect()
 
         if resultado["payload"]:
-            return json.loads(resultado["payload"]), None
+            return json.loads(resultado["payload"])
 
-        return None, "Nenhuma mensagem MQTT recebida no tempo de espera."
+        return None
 
-    except Exception as erro:
-        return None, str(erro)
+    except Exception:
+        return None
 
 
 def formatar_horario(timestamp):
@@ -160,52 +155,52 @@ paradas_df = pd.DataFrame(PARADAS)
 
 
 # =========================
-# LEITURA MQTT
+# LEITURA DOS DADOS
 # =========================
-dados_mqtt, erro_mqtt = ler_dados_mqtt()
+dados_reais = ler_dados_reais()
 
-if "historico_mqtt" not in st.session_state:
-    st.session_state["historico_mqtt"] = []
+if "historico_operacional" not in st.session_state:
+    st.session_state["historico_operacional"] = []
 
-if dados_mqtt:
-    ultimo_timestamp = dados_mqtt.get("timestamp", "")
+if dados_reais:
+    ultimo_timestamp = dados_reais.get("timestamp", "")
 
     ja_existe = any(
         item.get("timestamp") == ultimo_timestamp
-        for item in st.session_state["historico_mqtt"]
+        for item in st.session_state["historico_operacional"]
     )
 
     if not ja_existe:
-        st.session_state["historico_mqtt"].append(dados_mqtt)
+        st.session_state["historico_operacional"].append(dados_reais)
 
-    st.session_state["historico_mqtt"] = st.session_state["historico_mqtt"][-100:]
+    st.session_state["historico_operacional"] = st.session_state["historico_operacional"][-100:]
 
 
 # =========================
 # STATUS ATUAL DO ÔNIBUS
 # =========================
-if dados_mqtt:
+if dados_reais:
     status_bus = {
-        "linha": dados_mqtt.get("linha", "290 Diadema - Jabaquara"),
-        "parada_atual": dados_mqtt.get("parada_atual", "Aguardando dados"),
-        "parada_referencia": dados_mqtt.get("parada_referencia", "Aguardando dados"),
+        "linha": dados_reais.get("linha", "290 Diadema - Jabaquara"),
+        "parada_atual": dados_reais.get("parada_atual", "Aguardando dados"),
+        "parada_referencia": dados_reais.get("parada_referencia", "Aguardando dados"),
         "sentido": "Terminal Diadema → Terminal Jabaquara",
-        "trecho": dados_mqtt.get("trecho", "Aguardando dados"),
-        "horario": formatar_horario(dados_mqtt.get("timestamp", "")),
-        "latitude": float(dados_mqtt.get("latitude", -23.682681458564325)),
-        "longitude": float(dados_mqtt.get("longitude", -46.62691332328152)),
-        "velocidade": float(dados_mqtt.get("velocidade_kmh", 0)),
-        "embarque": int(dados_mqtt.get("embarque", 0)),
-        "desembarque": int(dados_mqtt.get("desembarque", 0)),
-        "pessoas_onibus": int(dados_mqtt.get("pessoas_onibus", 0)),
-        "situacao": dados_mqtt.get("situacao", "Aguardando dados"),
-        "satelites": dados_mqtt.get("satelites", 0),
+        "trecho": dados_reais.get("trecho", "Aguardando dados"),
+        "horario": formatar_horario(dados_reais.get("timestamp", "")),
+        "latitude": float(dados_reais.get("latitude", -23.682681458564325)),
+        "longitude": float(dados_reais.get("longitude", -46.62691332328152)),
+        "velocidade": float(dados_reais.get("velocidade_kmh", 0)),
+        "embarque": int(dados_reais.get("embarque", 0)),
+        "desembarque": int(dados_reais.get("desembarque", 0)),
+        "pessoas_onibus": int(dados_reais.get("pessoas_onibus", 0)),
+        "situacao": dados_reais.get("situacao", "Aguardando dados"),
+        "satelites": dados_reais.get("satelites", 0),
     }
 else:
     status_bus = {
         "linha": "290 Diadema - Jabaquara",
-        "parada_atual": "Aguardando MQTT",
-        "parada_referencia": "Aguardando MQTT",
+        "parada_atual": "Aguardando dados",
+        "parada_referencia": "Aguardando dados",
         "sentido": "Terminal Diadema → Terminal Jabaquara",
         "trecho": "Aguardando dados",
         "horario": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
@@ -215,7 +210,7 @@ else:
         "embarque": 0,
         "desembarque": 0,
         "pessoas_onibus": 0,
-        "situacao": "Sem dados MQTT",
+        "situacao": "Aguardando dados",
         "satelites": 0,
     }
 
@@ -223,7 +218,7 @@ parada_exibida = "Em rota" if status_bus["velocidade"] > 5 else status_bus["para
 
 
 # =========================
-# TABELA OPERACIONAL DINÂMICA
+# TABELA OPERACIONAL
 # =========================
 dados_tabela = []
 
@@ -238,7 +233,7 @@ for parada in PARADAS:
         "Pessoas no ônibus": 0
     })
 
-for leitura in st.session_state["historico_mqtt"]:
+for leitura in st.session_state["historico_operacional"]:
     parada_ref = leitura.get("parada_referencia", "")
 
     for linha in dados_tabela:
@@ -256,13 +251,6 @@ df_operacional = pd.DataFrame(dados_tabela)
 # TÍTULO
 # =========================
 st.markdown('<div class="main-title">Painel de Controle Next Mobilidade</div>', unsafe_allow_html=True)
-
-if dados_mqtt:
-    st.success("Dashboard conectado ao MQTT em tempo real.")
-else:
-    st.warning("Aguardando dados MQTT do Raspberry Pi.")
-    if erro_mqtt:
-        st.caption(f"Detalhe técnico: {erro_mqtt}")
 
 
 # =========================
