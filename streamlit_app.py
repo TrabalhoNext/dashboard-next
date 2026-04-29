@@ -1,15 +1,90 @@
+import json
+import time
+from datetime import datetime
+
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-from datetime import datetime
+import paho.mqtt.client as mqtt
+from streamlit_autorefresh import st_autorefresh
 
+
+# =========================
+# CONFIGURAÇÃO DA PÁGINA
+# =========================
 st.set_page_config(
     page_title="Next Mobilidade Dashboard",
     page_icon="🚌",
     layout="wide"
 )
 
+# Atualiza o painel automaticamente a cada 3 segundos
+st_autorefresh(interval=3000, key="atualizacao_dashboard_mqtt")
+
+
+# =========================
+# CONFIGURAÇÃO MQTT
+# =========================
+MQTT_BROKER = "broker.hivemq.com"
+MQTT_PORT = 1883
+MQTT_TOPIC = "next/linha290/onibus01/gps"
+
+
+@st.cache_data(ttl=2, show_spinner=False)
+def ler_dados_mqtt():
+    resultado = {"payload": None}
+
+    def on_connect(client, userdata, flags, reason_code, properties=None):
+        client.subscribe(MQTT_TOPIC)
+
+    def on_message(client, userdata, msg):
+        resultado["payload"] = msg.payload.decode("utf-8")
+
+    client_id = f"streamlit_next_{int(time.time() * 1000)}"
+
+    try:
+        client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id=client_id
+        )
+    except Exception:
+        client = mqtt.Client(client_id=client_id)
+
+    client.on_connect = on_connect
+    client.on_message = on_message
+
+    try:
+        client.connect(MQTT_BROKER, MQTT_PORT, 60)
+        client.loop_start()
+
+        inicio = time.time()
+        while resultado["payload"] is None and time.time() - inicio < 3:
+            time.sleep(0.1)
+
+        client.loop_stop()
+        client.disconnect()
+
+        if resultado["payload"]:
+            return json.loads(resultado["payload"])
+
+        return None
+
+    except Exception:
+        return None
+
+
+def formatar_horario(timestamp):
+    try:
+        dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        return dt.strftime("%d/%m/%Y %H:%M:%S")
+    except Exception:
+        return datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+
+# =========================
+# ESTILO VISUAL
+# =========================
 st.markdown("""
 <style>
 .main-title {
@@ -51,6 +126,7 @@ div[data-testid="stDataFrame"] {
 </style>
 """, unsafe_allow_html=True)
 
+
 # =========================
 # PARADAS OFICIAIS DA LINHA
 # =========================
@@ -70,134 +146,110 @@ PARADAS = [
 
 paradas_df = pd.DataFrame(PARADAS)
 
+
 # =========================
-# DADOS DE DEMONSTRAÇÃO
+# LEITURA DOS DADOS MQTT
 # =========================
-status_bus = {
-    "linha": "290 Diadema - Jabaquara",
-    "parada_atual": "Parada Americanópolis",
-    "sentido": "Terminal Diadema → Terminal Jabaquara",
-    "trecho": "Parada Americanópolis → Parada Faccini",
-    "horario": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-    "latitude": -23.66095067269106,
-    "longitude": -46.637240408622645,
-    "velocidade": 6.2,
-    "embarque": 6,
-    "desembarque": 1,
-    "pessoas_onibus": 23,
-    "situacao": "Em movimento"
-}
+dados_mqtt = ler_dados_mqtt()
+
+if "historico_mqtt" not in st.session_state:
+    st.session_state["historico_mqtt"] = []
+
+if dados_mqtt:
+    ultimo_timestamp = dados_mqtt.get("timestamp", "")
+
+    ja_existe = any(
+        item.get("timestamp") == ultimo_timestamp
+        for item in st.session_state["historico_mqtt"]
+    )
+
+    if not ja_existe:
+        st.session_state["historico_mqtt"].append(dados_mqtt)
+
+    st.session_state["historico_mqtt"] = st.session_state["historico_mqtt"][-100:]
+
+
+# =========================
+# STATUS ATUAL DO ÔNIBUS
+# =========================
+if dados_mqtt:
+    status_bus = {
+        "linha": dados_mqtt.get("linha", "290 Diadema - Jabaquara"),
+        "parada_atual": dados_mqtt.get("parada_atual", "Aguardando dados"),
+        "parada_referencia": dados_mqtt.get("parada_referencia", "Aguardando dados"),
+        "sentido": "Terminal Diadema → Terminal Jabaquara",
+        "trecho": dados_mqtt.get("trecho", "Aguardando dados"),
+        "horario": formatar_horario(dados_mqtt.get("timestamp", "")),
+        "latitude": float(dados_mqtt.get("latitude", -23.682681458564325)),
+        "longitude": float(dados_mqtt.get("longitude", -46.62691332328152)),
+        "velocidade": float(dados_mqtt.get("velocidade_kmh", 0)),
+        "embarque": int(dados_mqtt.get("embarque", 0)),
+        "desembarque": int(dados_mqtt.get("desembarque", 0)),
+        "pessoas_onibus": int(dados_mqtt.get("pessoas_onibus", 0)),
+        "situacao": dados_mqtt.get("situacao", "Aguardando dados"),
+        "satelites": dados_mqtt.get("satelites", 0),
+    }
+else:
+    status_bus = {
+        "linha": "290 Diadema - Jabaquara",
+        "parada_atual": "Aguardando MQTT",
+        "parada_referencia": "Aguardando MQTT",
+        "sentido": "Terminal Diadema → Terminal Jabaquara",
+        "trecho": "Aguardando dados",
+        "horario": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+        "latitude": -23.682681458564325,
+        "longitude": -46.62691332328152,
+        "velocidade": 0,
+        "embarque": 0,
+        "desembarque": 0,
+        "pessoas_onibus": 0,
+        "situacao": "Sem dados MQTT",
+        "satelites": 0,
+    }
 
 parada_exibida = "Em rota" if status_bus["velocidade"] > 5 else status_bus["parada_atual"]
 
-dados_tabela = [
-    {
-        "Ordem": 1,
-        "Parada/Terminal": "Terminal Diadema",
-        "Horário": "07:10:00",
-        "Situação": "Parado",
-        "Embarque": 8,
-        "Desembarque": 0,
-        "Pessoas no ônibus": 8
-    },
-    {
-        "Ordem": 2,
-        "Parada/Terminal": "Parada Assembleia",
-        "Horário": "07:18:00",
-        "Situação": "Parado",
-        "Embarque": 4,
-        "Desembarque": 1,
-        "Pessoas no ônibus": 11
-    },
-    {
-        "Ordem": 3,
-        "Parada/Terminal": "Parada Divisa",
-        "Horário": "07:28:00",
-        "Situação": "Parado",
-        "Embarque": 7,
-        "Desembarque": 2,
-        "Pessoas no ônibus": 16
-    },
-    {
-        "Ordem": 4,
-        "Parada/Terminal": "Parada Vila Clara",
-        "Horário": "07:34:00",
-        "Situação": "Parado",
-        "Embarque": 5,
-        "Desembarque": 3,
-        "Pessoas no ônibus": 18
-    },
-    {
-        "Ordem": 5,
-        "Parada/Terminal": "Parada Bom Clima",
-        "Horário": "07:38:00",
-        "Situação": "Parado",
-        "Embarque": 3,
-        "Desembarque": 1,
-        "Pessoas no ônibus": 20
-    },
-    {
-        "Ordem": 6,
-        "Parada/Terminal": "Parada São José",
-        "Horário": "07:42:00",
-        "Situação": "Parado",
-        "Embarque": 2,
-        "Desembarque": 1,
-        "Pessoas no ônibus": 21
-    },
-    {
-        "Ordem": 7,
-        "Parada/Terminal": "Parada Americanópolis",
-        "Horário": "07:46:00",
-        "Situação": "Parado",
-        "Embarque": 6,
-        "Desembarque": 1,
-        "Pessoas no ônibus": 23
-    },
-    {
-        "Ordem": 8,
-        "Parada/Terminal": "Parada Faccini",
-        "Horário": "07:52:00",
-        "Situação": "Parado",
-        "Embarque": 3,
-        "Desembarque": 4,
-        "Pessoas no ônibus": 22
-    },
-    {
-        "Ordem": 9,
-        "Parada/Terminal": "Parada Encontro",
-        "Horário": "07:58:00",
-        "Situação": "Parado",
-        "Embarque": 2,
-        "Desembarque": 3,
-        "Pessoas no ônibus": 21
-    },
-    {
-        "Ordem": 10,
-        "Parada/Terminal": "Parada Cidade Vargas",
-        "Horário": "08:05:00",
-        "Situação": "Parado",
-        "Embarque": 1,
-        "Desembarque": 6,
-        "Pessoas no ônibus": 16
-    },
-    {
-        "Ordem": 11,
-        "Parada/Terminal": "Terminal Jabaquara",
-        "Horário": "08:12:00",
-        "Situação": "Parado",
+
+# =========================
+# TABELA OPERACIONAL DINÂMICA
+# =========================
+dados_tabela = []
+
+for parada in PARADAS:
+    dados_tabela.append({
+        "Ordem": parada["ordem"],
+        "Parada/Terminal": parada["nome"],
+        "Horário": "-",
+        "Situação": "-",
         "Embarque": 0,
-        "Desembarque": 16,
+        "Desembarque": 0,
         "Pessoas no ônibus": 0
-    }
-]
+    })
+
+for leitura in st.session_state["historico_mqtt"]:
+    parada_ref = leitura.get("parada_referencia", "")
+
+    for linha in dados_tabela:
+        if linha["Parada/Terminal"] == parada_ref:
+            linha["Horário"] = formatar_horario(leitura.get("timestamp", ""))
+            linha["Situação"] = leitura.get("situacao", "-")
+            linha["Embarque"] = int(leitura.get("embarque", 0))
+            linha["Desembarque"] = int(leitura.get("desembarque", 0))
+            linha["Pessoas no ônibus"] = int(leitura.get("pessoas_onibus", 0))
 
 df_operacional = pd.DataFrame(dados_tabela)
+
 
 # =========================
 # TÍTULO
 # =========================
 st.markdown('<div class="main-title">Painel de Controle Next Mobilidade</div>', unsafe_allow_html=True)
+
+if dados_mqtt:
+    st.success("Dashboard conectado ao MQTT em tempo real.")
+else:
+    st.warning("Aguardando dados MQTT do Raspberry Pi.")
+
 
 # =========================
 # CARDS SUPERIORES
@@ -280,11 +332,13 @@ with col9:
     </div>
     """, unsafe_allow_html=True)
 
+
 # =========================
 # TABELA OPERACIONAL
 # =========================
 st.markdown('<div class="section-title">Tabela operacional por parada</div>', unsafe_allow_html=True)
 st.dataframe(df_operacional, use_container_width=True, hide_index=True)
+
 
 # =========================
 # MAPA + GRÁFICO
@@ -318,16 +372,19 @@ with m1:
         zoom=11.8,
         height=500
     )
+
     fig_mapa.update_layout(
         mapbox_style="open-street-map",
         margin=dict(l=0, r=0, t=0, b=0)
     )
+
     st.plotly_chart(fig_mapa, use_container_width=True)
 
 with m2:
     st.markdown('<div class="section-title">Fluxo de embarque, desembarque e lotação</div>', unsafe_allow_html=True)
 
     fig_fluxo = go.Figure()
+
     fig_fluxo.add_trace(
         go.Bar(
             x=df_operacional["Parada/Terminal"],
@@ -335,6 +392,7 @@ with m2:
             name="Embarque"
         )
     )
+
     fig_fluxo.add_trace(
         go.Bar(
             x=df_operacional["Parada/Terminal"],
@@ -342,6 +400,7 @@ with m2:
             name="Desembarque"
         )
     )
+
     fig_fluxo.add_trace(
         go.Scatter(
             x=df_operacional["Parada/Terminal"],
@@ -369,7 +428,13 @@ with m2:
             side="right",
             showgrid=False
         ),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
         margin=dict(l=20, r=20, t=40, b=80)
     )
 
