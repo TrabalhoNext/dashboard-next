@@ -19,21 +19,26 @@ st.set_page_config(
     layout="wide"
 )
 
-# Atualiza o painel automaticamente a cada 3 segundos
-st_autorefresh(interval=3000, key="atualizacao_dashboard_mqtt")
+# Atualiza o dashboard automaticamente a cada 3 segundos
+st_autorefresh(interval=3000, key="atualizacao_mqtt")
 
 
 # =========================
 # CONFIGURAÇÃO MQTT
 # =========================
+# O Raspberry publica no mesmo broker pela porta 1883.
+# O Streamlit lê pelo WebSocket na porta 8000.
 MQTT_BROKER = "broker.hivemq.com"
-MQTT_PORT = 1883
+MQTT_PORT = 8000
 MQTT_TOPIC = "next/linha290/onibus01/gps"
+MQTT_WEBSOCKET_PATH = "/mqtt"
 
 
-@st.cache_data(ttl=2, show_spinner=False)
 def ler_dados_mqtt():
-    resultado = {"payload": None}
+    resultado = {
+        "payload": None,
+        "erro": None
+    }
 
     def on_connect(client, userdata, flags, reason_code, properties=None):
         client.subscribe(MQTT_TOPIC)
@@ -44,39 +49,46 @@ def ler_dados_mqtt():
     client_id = f"streamlit_next_{int(time.time() * 1000)}"
 
     try:
-        client = mqtt.Client(
-            mqtt.CallbackAPIVersion.VERSION2,
-            client_id=client_id
-        )
-    except Exception:
-        client = mqtt.Client(client_id=client_id)
+        try:
+            client = mqtt.Client(
+                mqtt.CallbackAPIVersion.VERSION2,
+                client_id=client_id,
+                transport="websockets"
+            )
+        except Exception:
+            client = mqtt.Client(
+                client_id=client_id,
+                transport="websockets"
+            )
 
-    client.on_connect = on_connect
-    client.on_message = on_message
+        client.ws_set_options(path=MQTT_WEBSOCKET_PATH)
 
-    try:
+        client.on_connect = on_connect
+        client.on_message = on_message
+
         client.connect(MQTT_BROKER, MQTT_PORT, 60)
         client.loop_start()
 
         inicio = time.time()
-        while resultado["payload"] is None and time.time() - inicio < 3:
+
+        while resultado["payload"] is None and time.time() - inicio < 5:
             time.sleep(0.1)
 
         client.loop_stop()
         client.disconnect()
 
         if resultado["payload"]:
-            return json.loads(resultado["payload"])
+            return json.loads(resultado["payload"]), None
 
-        return None
+        return None, "Nenhuma mensagem MQTT recebida no tempo de espera."
 
-    except Exception:
-        return None
+    except Exception as erro:
+        return None, str(erro)
 
 
 def formatar_horario(timestamp):
     try:
-        dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
         return dt.strftime("%d/%m/%Y %H:%M:%S")
     except Exception:
         return datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -148,9 +160,9 @@ paradas_df = pd.DataFrame(PARADAS)
 
 
 # =========================
-# LEITURA DOS DADOS MQTT
+# LEITURA MQTT
 # =========================
-dados_mqtt = ler_dados_mqtt()
+dados_mqtt, erro_mqtt = ler_dados_mqtt()
 
 if "historico_mqtt" not in st.session_state:
     st.session_state["historico_mqtt"] = []
@@ -249,6 +261,8 @@ if dados_mqtt:
     st.success("Dashboard conectado ao MQTT em tempo real.")
 else:
     st.warning("Aguardando dados MQTT do Raspberry Pi.")
+    if erro_mqtt:
+        st.caption(f"Detalhe técnico: {erro_mqtt}")
 
 
 # =========================
