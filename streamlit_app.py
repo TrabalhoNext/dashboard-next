@@ -29,7 +29,7 @@ st_autorefresh(interval=180000, key="atualizacao_dashboard")
 # =========================
 MQTT_BROKER = "5031204390404922a3a816878ccfd1f4.s1.eu.hivemq.cloud"
 MQTT_PORT = 8883
-MQTT_TOPIC = "next/linha290/gps"
+MQTT_TOPIC = "próximo/linha290/gps"
 
 
 # =========================
