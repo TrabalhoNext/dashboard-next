@@ -20,8 +20,8 @@ st.set_page_config(
     layout="wide"
 )
 
-# Atualização automática do painel
-st_autorefresh(interval=3000, key="atualizacao_dashboard")
+# Atualização automática do painel a cada 3 minutos
+st_autorefresh(interval=180000, key="atualizacao_dashboard")
 
 
 # =========================
@@ -31,20 +31,32 @@ MQTT_BROKER = "5031204390404922a3a816878ccfd1f4.s1.eu.hivemq.cloud"
 MQTT_PORT = 8883
 MQTT_TOPIC = "next/linha290/gps"
 
-# Usuário e senha devem ficar no Secrets do Streamlit Cloud
-MQTT_USUARIO = st.secrets["mqtt"]["usuario"]
-MQTT_SENHA = st.secrets["mqtt"]["senha"]
+
+# =========================
+# CREDENCIAIS DO STREAMLIT SECRETS
+# =========================
+def obter_credenciais_mqtt():
+    try:
+        usuario = st.secrets["mqtt"]["usuario"]
+        senha = st.secrets["mqtt"]["senha"]
+        return usuario, senha
+    except Exception:
+        return None, None
 
 
 # =========================
 # LEITURA DOS DADOS VIA MQTT
 # =========================
 def ler_dados_reais():
+    usuario, senha = obter_credenciais_mqtt()
+
+    if not usuario or not senha:
+        return None, "Credenciais MQTT não configuradas no Streamlit Secrets."
+
     resultado = {"payload": None}
 
     def on_connect(client, userdata, flags, reason_code, properties=None):
-        if reason_code == 0:
-            client.subscribe(MQTT_TOPIC)
+        client.subscribe(MQTT_TOPIC)
 
     def on_message(client, userdata, msg):
         resultado["payload"] = msg.payload.decode("utf-8")
@@ -60,7 +72,7 @@ def ler_dados_reais():
         except Exception:
             client = mqtt.Client(client_id=client_id)
 
-        client.username_pw_set(MQTT_USUARIO, MQTT_SENHA)
+        client.username_pw_set(usuario, senha)
         client.tls_set(tls_version=ssl.PROTOCOL_TLS_CLIENT)
         client.tls_insecure_set(False)
 
@@ -72,22 +84,24 @@ def ler_dados_reais():
 
         inicio = time.time()
 
-        while resultado["payload"] is None and time.time() - inicio < 4:
+        while resultado["payload"] is None and time.time() - inicio < 6:
             time.sleep(0.1)
 
         client.loop_stop()
         client.disconnect()
 
         if resultado["payload"]:
-            return json.loads(resultado["payload"])
+            return json.loads(resultado["payload"]), None
 
-        return None
+        return None, "Nenhuma nova mensagem recebida neste ciclo."
 
     except Exception as erro:
-        st.warning(f"Aguardando conexão com o MQTT: {erro}")
-        return None
+        return None, f"Erro na conexão MQTT: {erro}"
 
 
+# =========================
+# FUNÇÕES AUXILIARES
+# =========================
 def converter_velocidade(valor):
     try:
         if isinstance(valor, str):
@@ -104,7 +118,17 @@ def formatar_horario(dados):
     if data and hora:
         return f"{data} {hora}"
 
-    return datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    return "Aguardando dados"
+
+
+def valor_texto(valor, padrao="Aguardando dados"):
+    if valor is None:
+        return padrao
+
+    if str(valor).strip() == "":
+        return padrao
+
+    return valor
 
 
 # =========================
@@ -173,15 +197,33 @@ paradas_df = pd.DataFrame(PARADAS)
 
 
 # =========================
-# LEITURA DOS DADOS
+# ESTADO INTERNO DO DASHBOARD
 # =========================
-dados_reais = ler_dados_reais()
-
 if "historico_operacional" not in st.session_state:
     st.session_state["historico_operacional"] = []
 
+if "ultimo_dado_recebido" not in st.session_state:
+    st.session_state["ultimo_dado_recebido"] = None
+
+if "ultimo_status_mqtt" not in st.session_state:
+    st.session_state["ultimo_status_mqtt"] = "Aguardando dados reais do Raspberry Pi via HiveMQ Cloud."
+
+
+# =========================
+# LEITURA DOS DADOS
+# =========================
+dados_reais, erro_mqtt = ler_dados_reais()
+
 if dados_reais:
-    chave_leitura = f'{dados_reais.get("data", "")}_{dados_reais.get("hora", "")}_{dados_reais.get("latitude", "")}_{dados_reais.get("longitude", "")}'
+    st.session_state["ultimo_dado_recebido"] = dados_reais
+    st.session_state["ultimo_status_mqtt"] = "Dashboard conectado ao HiveMQ Cloud e recebendo dados reais do Raspberry Pi."
+
+    chave_leitura = (
+        f'{dados_reais.get("data", "")}_'
+        f'{dados_reais.get("hora", "")}_'
+        f'{dados_reais.get("latitude", "")}_'
+        f'{dados_reais.get("longitude", "")}'
+    )
 
     ja_existe = any(
         item.get("chave_leitura") == chave_leitura
@@ -194,46 +236,63 @@ if dados_reais:
 
     st.session_state["historico_operacional"] = st.session_state["historico_operacional"][-100:]
 
+elif erro_mqtt:
+    if st.session_state["ultimo_dado_recebido"]:
+        st.session_state["ultimo_status_mqtt"] = (
+            "Sem nova mensagem neste ciclo. Exibindo o último dado recebido do Raspberry Pi."
+        )
+    else:
+        st.session_state["ultimo_status_mqtt"] = erro_mqtt
+
+
+dados_exibicao = st.session_state["ultimo_dado_recebido"]
+
 
 # =========================
 # STATUS ATUAL DO ÔNIBUS
 # =========================
-if dados_reais:
-    velocidade_numero = converter_velocidade(dados_reais.get("velocidade", "0 km/h"))
+if dados_exibicao:
+    velocidade_numero = converter_velocidade(dados_exibicao.get("velocidade", "0 km/h"))
 
     status_bus = {
         "linha": "290 Diadema - Jabaquara",
-        "parada_atual": dados_reais.get("parada_atual", "Aguardando dados"),
-        "sentido": dados_reais.get("sentido", "Aguardando dados"),
-        "trecho": dados_reais.get("trecho", "Aguardando dados"),
-        "horario": formatar_horario(dados_reais),
-        "latitude": float(dados_reais.get("latitude", -23.682681458564325)),
-        "longitude": float(dados_reais.get("longitude", -46.62691332328152)),
+        "parada_atual": valor_texto(dados_exibicao.get("parada_atual")),
+        "sentido": valor_texto(dados_exibicao.get("sentido")),
+        "trecho": valor_texto(dados_exibicao.get("trecho")),
+        "horario": formatar_horario(dados_exibicao),
+        "latitude": dados_exibicao.get("latitude"),
+        "longitude": dados_exibicao.get("longitude"),
         "velocidade": velocidade_numero,
-        "velocidade_texto": dados_reais.get("velocidade", "0 km/h"),
-        "situacao": dados_reais.get("situacao", "Aguardando dados"),
+        "velocidade_texto": valor_texto(dados_exibicao.get("velocidade"), "0 km/h"),
+        "situacao": valor_texto(dados_exibicao.get("situacao")),
         "embarque": "Aguardando dados",
         "desembarque": "Aguardando dados",
         "pessoas_onibus": "Aguardando dados",
     }
+
+    possui_coordenada_real = (
+        status_bus["latitude"] is not None
+        and status_bus["longitude"] is not None
+    )
+
 else:
     status_bus = {
         "linha": "290 Diadema - Jabaquara",
         "parada_atual": "Aguardando dados",
         "sentido": "Aguardando dados",
         "trecho": "Aguardando dados",
-        "horario": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-        "latitude": -23.682681458564325,
-        "longitude": -46.62691332328152,
+        "horario": "Aguardando dados",
+        "latitude": "Aguardando dados",
+        "longitude": "Aguardando dados",
         "velocidade": 0.0,
-        "velocidade_texto": "0 km/h",
+        "velocidade_texto": "Aguardando dados",
         "situacao": "Aguardando dados",
         "embarque": "Aguardando dados",
         "desembarque": "Aguardando dados",
         "pessoas_onibus": "Aguardando dados",
     }
 
-parada_exibida = status_bus["parada_atual"]
+    possui_coordenada_real = False
 
 
 # =========================
@@ -274,10 +333,10 @@ st.markdown('<div class="main-title">Painel de Controle Next Mobilidade</div>', 
 # =========================
 # STATUS DA CONEXÃO
 # =========================
-if dados_reais:
-    st.success("Dashboard conectado ao HiveMQ Cloud e recebendo dados reais do Raspberry Pi.")
+if dados_exibicao:
+    st.success(st.session_state["ultimo_status_mqtt"])
 else:
-    st.info("Aguardando dados reais do Raspberry Pi via HiveMQ Cloud.")
+    st.info(st.session_state["ultimo_status_mqtt"])
 
 
 # =========================
@@ -297,7 +356,7 @@ with col2:
     st.markdown(f"""
     <div class="card">
         <div class="card-title">Parada atual</div>
-        <div class="card-value">{parada_exibida}</div>
+        <div class="card-value">{status_bus["parada_atual"]}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -377,20 +436,26 @@ m1, m2 = st.columns(2)
 with m1:
     st.markdown('<div class="section-title">Mapa com localização do ônibus</div>', unsafe_allow_html=True)
 
-    mapa_df = pd.concat(
-        [
-            paradas_df[["nome", "lat", "lon"]].assign(tipo="Paradas"),
-            pd.DataFrame([
+    mapa_df = paradas_df[["nome", "lat", "lon"]].assign(tipo="Paradas")
+
+    if possui_coordenada_real:
+        try:
+            latitude_onibus = float(status_bus["latitude"])
+            longitude_onibus = float(status_bus["longitude"])
+
+            onibus_df = pd.DataFrame([
                 {
                     "nome": "Ônibus em operação",
-                    "lat": status_bus["latitude"],
-                    "lon": status_bus["longitude"],
+                    "lat": latitude_onibus,
+                    "lon": longitude_onibus,
                     "tipo": "Ônibus"
                 }
             ])
-        ],
-        ignore_index=True
-    )
+
+            mapa_df = pd.concat([mapa_df, onibus_df], ignore_index=True)
+
+        except Exception:
+            pass
 
     fig_mapa = px.scatter_mapbox(
         mapa_df,
