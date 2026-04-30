@@ -1,5 +1,6 @@
 import json
 import time
+import ssl
 from datetime import datetime
 
 import streamlit as st
@@ -24,19 +25,26 @@ st_autorefresh(interval=3000, key="atualizacao_dashboard")
 
 
 # =========================
-# CONFIGURAÇÃO INTERNA MQTT
+# CONFIGURAÇÃO MQTT - HIVEMQ CLOUD
 # =========================
-MQTT_BROKER = "broker.hivemq.com"
-MQTT_PORT = 8000
-MQTT_TOPIC = "next/linha290/onibus01/gps"
-MQTT_WEBSOCKET_PATH = "/mqtt"
+MQTT_BROKER = "5031204390404922a3a816878ccfd1f4.s1.eu.hivemq.cloud"
+MQTT_PORT = 8883
+MQTT_TOPIC = "next/linha290/gps"
+
+# Usuário e senha devem ficar no Secrets do Streamlit Cloud
+MQTT_USUARIO = st.secrets["mqtt"]["usuario"]
+MQTT_SENHA = st.secrets["mqtt"]["senha"]
 
 
+# =========================
+# LEITURA DOS DADOS VIA MQTT
+# =========================
 def ler_dados_reais():
     resultado = {"payload": None}
 
     def on_connect(client, userdata, flags, reason_code, properties=None):
-        client.subscribe(MQTT_TOPIC)
+        if reason_code == 0:
+            client.subscribe(MQTT_TOPIC)
 
     def on_message(client, userdata, msg):
         resultado["payload"] = msg.payload.decode("utf-8")
@@ -47,16 +55,14 @@ def ler_dados_reais():
         try:
             client = mqtt.Client(
                 mqtt.CallbackAPIVersion.VERSION2,
-                client_id=client_id,
-                transport="websockets"
+                client_id=client_id
             )
         except Exception:
-            client = mqtt.Client(
-                client_id=client_id,
-                transport="websockets"
-            )
+            client = mqtt.Client(client_id=client_id)
 
-        client.ws_set_options(path=MQTT_WEBSOCKET_PATH)
+        client.username_pw_set(MQTT_USUARIO, MQTT_SENHA)
+        client.tls_set(tls_version=ssl.PROTOCOL_TLS_CLIENT)
+        client.tls_insecure_set(False)
 
         client.on_connect = on_connect
         client.on_message = on_message
@@ -77,16 +83,28 @@ def ler_dados_reais():
 
         return None
 
-    except Exception:
+    except Exception as erro:
+        st.warning(f"Aguardando conexão com o MQTT: {erro}")
         return None
 
 
-def formatar_horario(timestamp):
+def converter_velocidade(valor):
     try:
-        dt = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
-        return dt.strftime("%d/%m/%Y %H:%M:%S")
+        if isinstance(valor, str):
+            valor = valor.replace("km/h", "").strip()
+        return float(valor)
     except Exception:
-        return datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        return 0.0
+
+
+def formatar_horario(dados):
+    data = dados.get("data", "")
+    hora = dados.get("hora", "")
+
+    if data and hora:
+        return f"{data} {hora}"
+
+    return datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
 
 # =========================
@@ -163,14 +181,15 @@ if "historico_operacional" not in st.session_state:
     st.session_state["historico_operacional"] = []
 
 if dados_reais:
-    ultimo_timestamp = dados_reais.get("timestamp", "")
+    chave_leitura = f'{dados_reais.get("data", "")}_{dados_reais.get("hora", "")}_{dados_reais.get("latitude", "")}_{dados_reais.get("longitude", "")}'
 
     ja_existe = any(
-        item.get("timestamp") == ultimo_timestamp
+        item.get("chave_leitura") == chave_leitura
         for item in st.session_state["historico_operacional"]
     )
 
     if not ja_existe:
+        dados_reais["chave_leitura"] = chave_leitura
         st.session_state["historico_operacional"].append(dados_reais)
 
     st.session_state["historico_operacional"] = st.session_state["historico_operacional"][-100:]
@@ -180,41 +199,41 @@ if dados_reais:
 # STATUS ATUAL DO ÔNIBUS
 # =========================
 if dados_reais:
+    velocidade_numero = converter_velocidade(dados_reais.get("velocidade", "0 km/h"))
+
     status_bus = {
-        "linha": dados_reais.get("linha", "290 Diadema - Jabaquara"),
+        "linha": "290 Diadema - Jabaquara",
         "parada_atual": dados_reais.get("parada_atual", "Aguardando dados"),
-        "parada_referencia": dados_reais.get("parada_referencia", "Aguardando dados"),
-        "sentido": "Terminal Diadema → Terminal Jabaquara",
+        "sentido": dados_reais.get("sentido", "Aguardando dados"),
         "trecho": dados_reais.get("trecho", "Aguardando dados"),
-        "horario": formatar_horario(dados_reais.get("timestamp", "")),
+        "horario": formatar_horario(dados_reais),
         "latitude": float(dados_reais.get("latitude", -23.682681458564325)),
         "longitude": float(dados_reais.get("longitude", -46.62691332328152)),
-        "velocidade": float(dados_reais.get("velocidade_kmh", 0)),
-        "embarque": int(dados_reais.get("embarque", 0)),
-        "desembarque": int(dados_reais.get("desembarque", 0)),
-        "pessoas_onibus": int(dados_reais.get("pessoas_onibus", 0)),
+        "velocidade": velocidade_numero,
+        "velocidade_texto": dados_reais.get("velocidade", "0 km/h"),
         "situacao": dados_reais.get("situacao", "Aguardando dados"),
-        "satelites": dados_reais.get("satelites", 0),
+        "embarque": "Aguardando dados",
+        "desembarque": "Aguardando dados",
+        "pessoas_onibus": "Aguardando dados",
     }
 else:
     status_bus = {
         "linha": "290 Diadema - Jabaquara",
         "parada_atual": "Aguardando dados",
-        "parada_referencia": "Aguardando dados",
-        "sentido": "Terminal Diadema → Terminal Jabaquara",
+        "sentido": "Aguardando dados",
         "trecho": "Aguardando dados",
         "horario": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
         "latitude": -23.682681458564325,
         "longitude": -46.62691332328152,
-        "velocidade": 0,
-        "embarque": 0,
-        "desembarque": 0,
-        "pessoas_onibus": 0,
+        "velocidade": 0.0,
+        "velocidade_texto": "0 km/h",
         "situacao": "Aguardando dados",
-        "satelites": 0,
+        "embarque": "Aguardando dados",
+        "desembarque": "Aguardando dados",
+        "pessoas_onibus": "Aguardando dados",
     }
 
-parada_exibida = "Em rota" if status_bus["velocidade"] > 5 else status_bus["parada_atual"]
+parada_exibida = status_bus["parada_atual"]
 
 
 # =========================
@@ -228,21 +247,20 @@ for parada in PARADAS:
         "Parada/Terminal": parada["nome"],
         "Horário": "-",
         "Situação": "-",
-        "Embarque": 0,
-        "Desembarque": 0,
-        "Pessoas no ônibus": 0
+        "Velocidade": "-",
+        "Embarque": "Aguardando dados",
+        "Desembarque": "Aguardando dados",
+        "Pessoas no ônibus": "Aguardando dados"
     })
 
 for leitura in st.session_state["historico_operacional"]:
-    parada_ref = leitura.get("parada_referencia", "")
+    parada_ref = leitura.get("parada_atual", "")
 
     for linha in dados_tabela:
         if linha["Parada/Terminal"] == parada_ref:
-            linha["Horário"] = formatar_horario(leitura.get("timestamp", ""))
+            linha["Horário"] = f'{leitura.get("data", "")} {leitura.get("hora", "")}'
             linha["Situação"] = leitura.get("situacao", "-")
-            linha["Embarque"] = int(leitura.get("embarque", 0))
-            linha["Desembarque"] = int(leitura.get("desembarque", 0))
-            linha["Pessoas no ônibus"] = int(leitura.get("pessoas_onibus", 0))
+            linha["Velocidade"] = leitura.get("velocidade", "-")
 
 df_operacional = pd.DataFrame(dados_tabela)
 
@@ -251,6 +269,15 @@ df_operacional = pd.DataFrame(dados_tabela)
 # TÍTULO
 # =========================
 st.markdown('<div class="main-title">Painel de Controle Next Mobilidade</div>', unsafe_allow_html=True)
+
+
+# =========================
+# STATUS DA CONEXÃO
+# =========================
+if dados_reais:
+    st.success("Dashboard conectado ao HiveMQ Cloud e recebendo dados reais do Raspberry Pi.")
+else:
+    st.info("Aguardando dados reais do Raspberry Pi via HiveMQ Cloud.")
 
 
 # =========================
@@ -314,7 +341,7 @@ with col7:
     st.markdown(f"""
     <div class="card">
         <div class="card-title">Velocidade</div>
-        <div class="card-value">{status_bus["velocidade"]:.1f} km/h</div>
+        <div class="card-value">{status_bus["velocidade_texto"]}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -385,28 +412,31 @@ with m1:
 with m2:
     st.markdown('<div class="section-title">Fluxo de embarque, desembarque e lotação</div>', unsafe_allow_html=True)
 
+    categorias = df_operacional["Parada/Terminal"].tolist()
+    valores_zerados = [0 for _ in categorias]
+
     fig_fluxo = go.Figure()
 
     fig_fluxo.add_trace(
         go.Bar(
-            x=df_operacional["Parada/Terminal"],
-            y=df_operacional["Embarque"],
+            x=categorias,
+            y=valores_zerados,
             name="Embarque"
         )
     )
 
     fig_fluxo.add_trace(
         go.Bar(
-            x=df_operacional["Parada/Terminal"],
-            y=df_operacional["Desembarque"],
+            x=categorias,
+            y=valores_zerados,
             name="Desembarque"
         )
     )
 
     fig_fluxo.add_trace(
         go.Scatter(
-            x=df_operacional["Parada/Terminal"],
-            y=df_operacional["Pessoas no ônibus"],
+            x=categorias,
+            y=valores_zerados,
             mode="lines+markers",
             name="Pessoas no ônibus",
             yaxis="y2"
@@ -421,7 +451,7 @@ with m2:
             title="Paradas e terminais",
             tickangle=-35,
             categoryorder="array",
-            categoryarray=df_operacional["Parada/Terminal"].tolist()
+            categoryarray=categorias
         ),
         yaxis_title="Embarque e desembarque",
         yaxis2=dict(
@@ -441,3 +471,5 @@ with m2:
     )
 
     st.plotly_chart(fig_fluxo, use_container_width=True)
+
+    st.caption("Os dados de embarque, desembarque e lotação serão integrados em etapa futura.")
