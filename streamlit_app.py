@@ -58,8 +58,9 @@ def ler_dados_reais():
     def on_connect(client, userdata, flags, reason_code=None, properties=None):
         try:
             client.subscribe(MQTT_TOPIC)
-        except Exception:
-            pass
+            except Exception as erro:
+        st.error(f"Erro ao conectar/ler HiveMQ: {erro}")
+        return None
 
     def on_message(client, userdata, msg):
         try:
