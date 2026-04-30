@@ -25,7 +25,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Atualização automática do painel a cada 3 minutos
 if st_autorefresh:
     st_autorefresh(interval=180000, key="atualizacao_dashboard")
 
@@ -128,83 +127,17 @@ def ler_dados_reais():
 # =========================
 
 PARADAS = [
-    {
-        "ordem": 1,
-        "nome": "Terminal Diadema",
-        "tipo": "Terminal",
-        "latitude": -23.682681458564325,
-        "longitude": -46.62691332328152
-    },
-    {
-        "ordem": 2,
-        "nome": "Parada Assembleia",
-        "tipo": "Parada",
-        "latitude": -23.67697409771605,
-        "longitude": -46.627793033156586
-    },
-    {
-        "ordem": 3,
-        "nome": "Parada Divisa",
-        "tipo": "Parada",
-        "latitude": -23.673551659194004,
-        "longitude": -46.63089933449298
-    },
-    {
-        "ordem": 4,
-        "nome": "Parada Vila Clara",
-        "tipo": "Parada",
-        "latitude": -23.670446876785558,
-        "longitude": -46.63259010672355
-    },
-    {
-        "ordem": 5,
-        "nome": "Parada Bom Clima",
-        "tipo": "Parada",
-        "latitude": -23.669120531442708,
-        "longitude": -46.63486429031358
-    },
-    {
-        "ordem": 6,
-        "nome": "Parada São José",
-        "tipo": "Parada",
-        "latitude": -23.664882066923965,
-        "longitude": -46.63779830145058
-    },
-    {
-        "ordem": 7,
-        "nome": "Parada Americanópolis",
-        "tipo": "Parada",
-        "latitude": -23.66095067269106,
-        "longitude": -46.637240408622645
-    },
-    {
-        "ordem": 8,
-        "nome": "Parada Faccini",
-        "tipo": "Parada",
-        "latitude": -23.656897096071692,
-        "longitude": -46.63611395876546
-    },
-    {
-        "ordem": 9,
-        "nome": "Parada Encontro",
-        "tipo": "Parada",
-        "latitude": -23.652614165456484,
-        "longitude": -46.63710571915031
-    },
-    {
-        "ordem": 10,
-        "nome": "Parada Cidade Vargas",
-        "tipo": "Parada",
-        "latitude": -23.648791349310596,
-        "longitude": -46.64064538509645
-    },
-    {
-        "ordem": 11,
-        "nome": "Terminal Jabaquara",
-        "tipo": "Terminal",
-        "latitude": -23.646183664190886,
-        "longitude": -46.639878302287805
-    },
+    {"ordem": 1, "nome": "Terminal Diadema", "tipo": "Terminal", "latitude": -23.682681458564325, "longitude": -46.62691332328152},
+    {"ordem": 2, "nome": "Parada Assembleia", "tipo": "Parada", "latitude": -23.67697409771605, "longitude": -46.627793033156586},
+    {"ordem": 3, "nome": "Parada Divisa", "tipo": "Parada", "latitude": -23.673551659194004, "longitude": -46.63089933449298},
+    {"ordem": 4, "nome": "Parada Vila Clara", "tipo": "Parada", "latitude": -23.670446876785558, "longitude": -46.63259010672355},
+    {"ordem": 5, "nome": "Parada Bom Clima", "tipo": "Parada", "latitude": -23.669120531442708, "longitude": -46.63486429031358},
+    {"ordem": 6, "nome": "Parada São José", "tipo": "Parada", "latitude": -23.664882066923965, "longitude": -46.63779830145058},
+    {"ordem": 7, "nome": "Parada Americanópolis", "tipo": "Parada", "latitude": -23.66095067269106, "longitude": -46.637240408622645},
+    {"ordem": 8, "nome": "Parada Faccini", "tipo": "Parada", "latitude": -23.656897096071692, "longitude": -46.63611395876546},
+    {"ordem": 9, "nome": "Parada Encontro", "tipo": "Parada", "latitude": -23.652614165456484, "longitude": -46.63710571915031},
+    {"ordem": 10, "nome": "Parada Cidade Vargas", "tipo": "Parada", "latitude": -23.648791349310596, "longitude": -46.64064538509645},
+    {"ordem": 11, "nome": "Terminal Jabaquara", "tipo": "Terminal", "latitude": -23.646183664190886, "longitude": -46.639878302287805},
 ]
 
 
@@ -235,10 +168,12 @@ def valor_tabela(valor):
     if valor is None:
         return ""
 
-    if str(valor).strip() == "":
+    texto = str(valor).strip()
+
+    if texto == "":
         return ""
 
-    if str(valor).strip().lower() == "aguardando dados":
+    if texto.lower() == "aguardando dados":
         return ""
 
     return valor
@@ -283,7 +218,8 @@ def calcular_distancia_km(lat1, lon1, lat2, lon2):
 
     a = (
         math.sin(diferenca_lat / 2) ** 2
-        + math.cos(lat1_rad) * math.cos(lat2_rad)
+        + math.cos(lat1_rad)
+        * math.cos(lat2_rad)
         * math.sin(diferenca_lon / 2) ** 2
     )
 
@@ -306,7 +242,6 @@ def card(titulo, conteudo_html):
 
 def montar_tabela_operacional(dados, parada_atual, hora, embarque, desembarque, lotacao):
     linhas = []
-
     tabela_mqtt = None
 
     if dados and isinstance(dados.get("tabela_paradas"), list):
@@ -348,6 +283,40 @@ def montar_tabela_operacional(dados, parada_atual, hora, embarque, desembarque, 
     return pd.DataFrame(linhas)
 
 
+def calcular_view_state_mapa(lat_onibus, lon_onibus):
+    pontos_lat = [p["latitude"] for p in PARADAS]
+    pontos_lon = [p["longitude"] for p in PARADAS]
+
+    if lat_onibus is not None and lon_onibus is not None:
+        pontos_lat.append(lat_onibus)
+        pontos_lon.append(lon_onibus)
+
+    lat_min = min(pontos_lat)
+    lat_max = max(pontos_lat)
+    lon_min = min(pontos_lon)
+    lon_max = max(pontos_lon)
+
+    centro_lat = (lat_min + lat_max) / 2
+    centro_lon = (lon_min + lon_max) / 2
+
+    abertura = max(lat_max - lat_min, lon_max - lon_min)
+
+    if abertura <= 0.025:
+        zoom = 14
+    elif abertura <= 0.045:
+        zoom = 13
+    elif abertura <= 0.080:
+        zoom = 12
+    elif abertura <= 0.140:
+        zoom = 11
+    elif abertura <= 0.250:
+        zoom = 10
+    else:
+        zoom = 9
+
+    return centro_lat, centro_lon, zoom
+
+
 # =========================
 # ESTILO VISUAL
 # =========================
@@ -360,10 +329,10 @@ st.markdown(
         }
 
         h1 {
-            font-size: 40px !important;
+            font-size: 36px !important;
             font-weight: 800 !important;
             color: #2b2d3a !important;
-            margin-bottom: 28px !important;
+            margin-bottom: 24px !important;
         }
 
         h2, h3 {
@@ -373,23 +342,23 @@ st.markdown(
 
         .card {
             background: #f8f9fb;
-            border-radius: 16px;
-            padding: 20px 22px;
-            min-height: 115px;
-            box-shadow: 0px 6px 18px rgba(0,0,0,0.07);
-            margin-bottom: 18px;
+            border-radius: 15px;
+            padding: 16px 18px;
+            min-height: 120px;
+            box-shadow: 0px 5px 16px rgba(0,0,0,0.06);
+            margin-bottom: 16px;
         }
 
         .card-title {
             color: #5b5b5b;
-            font-size: 17px;
+            font-size: 15px;
             font-weight: 700;
-            margin-bottom: 12px;
+            margin-bottom: 10px;
         }
 
         .card-value {
             color: #171717;
-            font-size: 22px;
+            font-size: 20px;
             font-weight: 800;
             line-height: 1.35;
         }
@@ -470,7 +439,7 @@ with col6:
     card("Localização", localizacao_html)
 
 
-col7, col8 = st.columns([1, 2])
+col7, col8, col9 = st.columns(3)
 
 with col7:
     card("Velocidade", texto_seguro(velocidade))
@@ -482,6 +451,9 @@ with col8:
         f"Lotação atual: {texto_seguro(lotacao)}"
     )
     card("Fluxo de passageiros", fluxo_html)
+
+with col9:
+    st.empty()
 
 
 # =========================
@@ -522,9 +494,6 @@ rota_coordenadas = [
     [p["longitude"], p["latitude"]] for p in PARADAS
 ]
 
-lat_centro_rota = sum(p["latitude"] for p in PARADAS) / len(PARADAS)
-lon_centro_rota = sum(p["longitude"] for p in PARADAS) / len(PARADAS)
-
 camadas = [
     pdk.Layer(
         "PathLayer",
@@ -535,32 +504,23 @@ camadas = [
             }
         ],
         get_path="path",
-        get_width=8,
-        get_color=[0, 90, 200, 230],
-        width_min_pixels=4,
+        get_width=7,
+        get_color=[0, 100, 230, 230],
+        width_min_pixels=5,
+        rounded=True,
         pickable=True
     ),
     pdk.Layer(
         "ScatterplotLayer",
         data=df_paradas,
         get_position="[longitude, latitude]",
-        get_radius=70,
-        get_fill_color=[0, 90, 200, 220],
-        get_line_color=[255, 255, 255],
+        get_radius=55,
+        get_fill_color=[255, 255, 255, 240],
+        get_line_color=[0, 100, 230, 230],
         line_width_min_pixels=2,
+        stroked=True,
+        filled=True,
         pickable=True
-    ),
-    pdk.Layer(
-        "TextLayer",
-        data=df_paradas,
-        get_position="[longitude, latitude]",
-        get_text="nome",
-        get_size=13,
-        get_color=[30, 30, 30],
-        get_angle=0,
-        get_text_anchor='"middle"',
-        get_alignment_baseline='"bottom"',
-        pickable=False
     )
 ]
 
@@ -578,44 +538,17 @@ if lat_onibus is not None and lon_onibus is not None:
             "ScatterplotLayer",
             data=df_onibus,
             get_position="[longitude, latitude]",
-            get_radius=140,
+            get_radius=120,
             get_fill_color=[220, 40, 40, 240],
             get_line_color=[255, 255, 255],
             line_width_min_pixels=3,
+            stroked=True,
+            filled=True,
             pickable=True
         )
     )
 
-    distancia_rota = min(
-        calcular_distancia_km(
-            lat_onibus,
-            lon_onibus,
-            parada["latitude"],
-            parada["longitude"]
-        )
-        for parada in PARADAS
-    )
-
-    if distancia_rota <= 1.5:
-        centro_lat = lat_onibus
-        centro_lon = lon_onibus
-        zoom_mapa = 13
-    elif distancia_rota <= 5:
-        centro_lat = (lat_onibus + lat_centro_rota) / 2
-        centro_lon = (lon_onibus + lon_centro_rota) / 2
-        zoom_mapa = 12
-    elif distancia_rota <= 12:
-        centro_lat = (lat_onibus + lat_centro_rota) / 2
-        centro_lon = (lon_onibus + lon_centro_rota) / 2
-        zoom_mapa = 11
-    else:
-        centro_lat = (lat_onibus + lat_centro_rota) / 2
-        centro_lon = (lon_onibus + lon_centro_rota) / 2
-        zoom_mapa = 10
-else:
-    centro_lat = lat_centro_rota
-    centro_lon = lon_centro_rota
-    zoom_mapa = 12
+centro_lat, centro_lon, zoom_mapa = calcular_view_state_mapa(lat_onibus, lon_onibus)
 
 view_state = pdk.ViewState(
     latitude=centro_lat,
