@@ -2,6 +2,7 @@ import json
 import time
 import ssl
 import html
+import math
 
 import streamlit as st
 import pandas as pd
@@ -230,6 +231,19 @@ def texto_seguro(valor):
     return html.escape(str(valor))
 
 
+def valor_tabela(valor):
+    if valor is None:
+        return ""
+
+    if str(valor).strip() == "":
+        return ""
+
+    if str(valor).strip().lower() == "aguardando dados":
+        return ""
+
+    return valor
+
+
 def velocidade_numerica(valor):
     try:
         if valor is None:
@@ -256,6 +270,28 @@ def converter_float(valor):
         return None
 
 
+def calcular_distancia_km(lat1, lon1, lat2, lon2):
+    raio_terra = 6371
+
+    lat1_rad = math.radians(lat1)
+    lon1_rad = math.radians(lon1)
+    lat2_rad = math.radians(lat2)
+    lon2_rad = math.radians(lon2)
+
+    diferenca_lat = lat2_rad - lat1_rad
+    diferenca_lon = lon2_rad - lon1_rad
+
+    a = (
+        math.sin(diferenca_lat / 2) ** 2
+        + math.cos(lat1_rad) * math.cos(lat2_rad)
+        * math.sin(diferenca_lon / 2) ** 2
+    )
+
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    return raio_terra * c
+
+
 def card(titulo, conteudo_html):
     st.markdown(
         f"""
@@ -268,22 +304,38 @@ def card(titulo, conteudo_html):
     )
 
 
-def montar_tabela_operacional(parada_atual, hora, embarque, desembarque, lotacao):
+def montar_tabela_operacional(dados, parada_atual, hora, embarque, desembarque, lotacao):
     linhas = []
+
+    tabela_mqtt = None
+
+    if dados and isinstance(dados.get("tabela_paradas"), list):
+        tabela_mqtt = dados.get("tabela_paradas")
 
     for parada in PARADAS:
         nome = parada["nome"]
 
-        if parada_atual == nome:
-            horario_linha = hora
-            embarque_linha = embarque
-            desembarque_linha = desembarque
-            lotacao_linha = lotacao
-        else:
-            horario_linha = "Aguardando dados"
-            embarque_linha = "Aguardando dados"
-            desembarque_linha = "Aguardando dados"
-            lotacao_linha = "Aguardando dados"
+        horario_linha = ""
+        embarque_linha = ""
+        desembarque_linha = ""
+        lotacao_linha = ""
+
+        if tabela_mqtt:
+            for item in tabela_mqtt:
+                nome_item = item.get("parada") or item.get("nome") or item.get("ponto")
+
+                if nome_item == nome:
+                    horario_linha = valor_tabela(item.get("hora") or item.get("horario"))
+                    embarque_linha = valor_tabela(item.get("embarque"))
+                    desembarque_linha = valor_tabela(item.get("desembarque"))
+                    lotacao_linha = valor_tabela(item.get("lotacao") or item.get("pessoas_onibus"))
+                    break
+
+        elif parada_atual == nome:
+            horario_linha = valor_tabela(hora)
+            embarque_linha = valor_tabela(embarque)
+            desembarque_linha = valor_tabela(desembarque)
+            lotacao_linha = valor_tabela(lotacao)
 
         linhas.append({
             "Parada / Terminal": nome,
@@ -439,6 +491,7 @@ with col8:
 st.subheader("Controle de passageiros por parada")
 
 tabela = montar_tabela_operacional(
+    dados=dados,
     parada_atual=parada_atual,
     hora=hora,
     embarque=embarque,
@@ -469,27 +522,45 @@ rota_coordenadas = [
     [p["longitude"], p["latitude"]] for p in PARADAS
 ]
 
+lat_centro_rota = sum(p["latitude"] for p in PARADAS) / len(PARADAS)
+lon_centro_rota = sum(p["longitude"] for p in PARADAS) / len(PARADAS)
+
 camadas = [
     pdk.Layer(
         "PathLayer",
         data=[
             {
                 "path": rota_coordenadas,
-                "tooltip": "Rota da linha 290"
+                "tooltip": "Rota cadastrada da linha 290"
             }
         ],
         get_path="path",
-        get_width=5,
-        get_color=[0, 90, 200],
+        get_width=8,
+        get_color=[0, 90, 200, 230],
+        width_min_pixels=4,
         pickable=True
     ),
     pdk.Layer(
         "ScatterplotLayer",
         data=df_paradas,
         get_position="[longitude, latitude]",
-        get_radius=65,
-        get_fill_color=[30, 120, 220],
+        get_radius=70,
+        get_fill_color=[0, 90, 200, 220],
+        get_line_color=[255, 255, 255],
+        line_width_min_pixels=2,
         pickable=True
+    ),
+    pdk.Layer(
+        "TextLayer",
+        data=df_paradas,
+        get_position="[longitude, latitude]",
+        get_text="nome",
+        get_size=13,
+        get_color=[30, 30, 30],
+        get_angle=0,
+        get_text_anchor='"middle"',
+        get_alignment_baseline='"bottom"',
+        pickable=False
     )
 ]
 
@@ -507,18 +578,43 @@ if lat_onibus is not None and lon_onibus is not None:
             "ScatterplotLayer",
             data=df_onibus,
             get_position="[longitude, latitude]",
-            get_radius=120,
-            get_fill_color=[220, 40, 40],
+            get_radius=140,
+            get_fill_color=[220, 40, 40, 240],
+            get_line_color=[255, 255, 255],
+            line_width_min_pixels=3,
             pickable=True
         )
     )
 
-    centro_lat = lat_onibus
-    centro_lon = lon_onibus
-    zoom_mapa = 13
+    distancia_rota = min(
+        calcular_distancia_km(
+            lat_onibus,
+            lon_onibus,
+            parada["latitude"],
+            parada["longitude"]
+        )
+        for parada in PARADAS
+    )
+
+    if distancia_rota <= 1.5:
+        centro_lat = lat_onibus
+        centro_lon = lon_onibus
+        zoom_mapa = 13
+    elif distancia_rota <= 5:
+        centro_lat = (lat_onibus + lat_centro_rota) / 2
+        centro_lon = (lon_onibus + lon_centro_rota) / 2
+        zoom_mapa = 12
+    elif distancia_rota <= 12:
+        centro_lat = (lat_onibus + lat_centro_rota) / 2
+        centro_lon = (lon_onibus + lon_centro_rota) / 2
+        zoom_mapa = 11
+    else:
+        centro_lat = (lat_onibus + lat_centro_rota) / 2
+        centro_lon = (lon_onibus + lon_centro_rota) / 2
+        zoom_mapa = 10
 else:
-    centro_lat = -23.664
-    centro_lon = -46.635
+    centro_lat = lat_centro_rota
+    centro_lon = lon_centro_rota
     zoom_mapa = 12
 
 view_state = pdk.ViewState(
@@ -530,7 +626,7 @@ view_state = pdk.ViewState(
 
 st.pydeck_chart(
     pdk.Deck(
-        map_style=None,
+        map_style="https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
         initial_view_state=view_state,
         layers=camadas,
         tooltip={"text": "{tooltip}"}
