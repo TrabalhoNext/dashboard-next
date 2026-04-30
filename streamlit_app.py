@@ -2,7 +2,6 @@ import json
 import time
 import ssl
 import html
-from datetime import datetime
 
 import streamlit as st
 import pandas as pd
@@ -69,24 +68,21 @@ def ler_dados_reais():
     usuario, senha = obter_credenciais_mqtt()
 
     if not usuario or not senha:
-        return None, "Credenciais MQTT não configuradas nos Secrets."
+        return None
 
-    resultado = {
-        "payload": None,
-        "erro": None
-    }
+    resultado = {"payload": None}
 
     def on_connect(client, userdata, flags, reason_code=None, properties=None):
         try:
             client.subscribe(MQTT_TOPIC)
-        except Exception as erro:
-            resultado["erro"] = f"Erro ao assinar tópico: {erro}"
+        except Exception:
+            pass
 
     def on_message(client, userdata, msg):
         try:
             resultado["payload"] = msg.payload.decode("utf-8")
-        except Exception as erro:
-            resultado["erro"] = f"Erro ao ler mensagem MQTT: {erro}"
+        except Exception:
+            resultado["payload"] = None
 
     client_id = f"dashboard_next_{int(time.time() * 1000)}"
 
@@ -117,29 +113,17 @@ def ler_dados_reais():
         client.disconnect()
 
         if resultado["payload"]:
-            try:
-                return json.loads(resultado["payload"]), "Dados recebidos do HiveMQ."
-            except Exception as erro:
-                return None, f"Mensagem recebida, mas JSON inválido: {erro}"
+            return json.loads(resultado["payload"])
 
-        if resultado["erro"]:
-            return None, resultado["erro"]
+        return None
 
-        return None, "Nenhuma mensagem recebida do HiveMQ."
-
-    except Exception as erro:
-        return None, f"Erro ao conectar no HiveMQ: {erro}"
+    except Exception:
+        return None
 
 
 # =========================
 # FUNÇÕES AUXILIARES
 # =========================
-
-def texto_seguro(valor):
-    if valor is None or valor == "":
-        return "Aguardando dados"
-    return html.escape(str(valor))
-
 
 def obter_valor(dados, chave):
     if not dados:
@@ -151,6 +135,12 @@ def obter_valor(dados, chave):
         return "Aguardando dados"
 
     return valor
+
+
+def texto_seguro(valor):
+    if valor is None or valor == "":
+        return "Aguardando dados"
+    return html.escape(str(valor))
 
 
 def velocidade_numerica(valor):
@@ -170,13 +160,6 @@ def velocidade_numerica(valor):
         return float(texto)
     except Exception:
         return 0.0
-
-
-def converter_float(valor):
-    try:
-        return float(valor)
-    except Exception:
-        return None
 
 
 def card(titulo, conteudo_html):
@@ -209,6 +192,11 @@ st.markdown(
             margin-bottom: 30px !important;
         }
 
+        h2, h3 {
+            color: #2b2d3a !important;
+            font-weight: 800 !important;
+        }
+
         .card {
             background: #f8f9fb;
             border-radius: 18px;
@@ -231,16 +219,6 @@ st.markdown(
             font-weight: 800;
             line-height: 1.5;
         }
-
-        .status-ok {
-            color: #1f7a1f;
-            font-weight: 700;
-        }
-
-        .status-alerta {
-            color: #9b6500;
-            font-weight: 700;
-        }
     </style>
     """,
     unsafe_allow_html=True
@@ -251,7 +229,7 @@ st.markdown(
 # CARREGAMENTO DOS DADOS
 # =========================
 
-dados, status_mqtt = ler_dados_reais()
+dados = ler_dados_reais()
 
 data = obter_valor(dados, "data")
 hora = obter_valor(dados, "hora")
@@ -259,22 +237,12 @@ latitude = obter_valor(dados, "latitude")
 longitude = obter_valor(dados, "longitude")
 velocidade = obter_valor(dados, "velocidade")
 parada_atual = obter_valor(dados, "parada_atual")
-situacao = obter_valor(dados, "situacao")
 sentido = obter_valor(dados, "sentido")
 trecho = obter_valor(dados, "trecho")
 
 embarque = obter_valor(dados, "embarque")
 desembarque = obter_valor(dados, "desembarque")
 lotacao = obter_valor(dados, "lotacao")
-
-if embarque == "Aguardando dados":
-    embarque = "Aguardando dados"
-
-if desembarque == "Aguardando dados":
-    desembarque = "Aguardando dados"
-
-if lotacao == "Aguardando dados":
-    lotacao = "Aguardando dados"
 
 vel_num = velocidade_numerica(velocidade)
 
@@ -345,76 +313,27 @@ with col9:
 
 
 # =========================
-# STATUS DA CONEXÃO
+# TABELA DAS PARADAS
 # =========================
 
-if dados:
-    st.markdown(
-        f"""
-        <p class="status-ok">
-        Dados recebidos do HiveMQ. Última atualização do painel: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
-        </p>
-        """,
-        unsafe_allow_html=True
-    )
-else:
-    st.markdown(
-        f"""
-        <p class="status-alerta">
-        Aguardando dados do HiveMQ. Status: {html.escape(status_mqtt)}
-        </p>
-        """,
-        unsafe_allow_html=True
-    )
+st.subheader("Paradas e terminais cadastrados")
 
-
-# =========================
-# TABELA DE DADOS
-# =========================
-
-st.subheader("Dados recebidos")
-
-tabela = pd.DataFrame([
-    {
-        "Data": data,
-        "Hora": hora,
-        "Latitude": latitude,
-        "Longitude": longitude,
-        "Velocidade": velocidade,
-        "Parada atual": parada_card,
-        "Situação": situacao,
-        "Sentido": sentido,
-        "Trecho": trecho,
-        "Embarque": embarque,
-        "Desembarque": desembarque,
-        "Pessoas no ônibus": lotacao
-    }
+paradas = pd.DataFrame([
+    {"Ordem": 1, "Ponto": "Terminal Diadema", "Tipo": "Terminal"},
+    {"Ordem": 2, "Ponto": "Parada Assembleia", "Tipo": "Parada"},
+    {"Ordem": 3, "Ponto": "Parada Divisa", "Tipo": "Parada"},
+    {"Ordem": 4, "Ponto": "Parada Vila Clara", "Tipo": "Parada"},
+    {"Ordem": 5, "Ponto": "Parada Bom Clima", "Tipo": "Parada"},
+    {"Ordem": 6, "Ponto": "Parada São José", "Tipo": "Parada"},
+    {"Ordem": 7, "Ponto": "Parada Americanópolis", "Tipo": "Parada"},
+    {"Ordem": 8, "Ponto": "Parada Faccini", "Tipo": "Parada"},
+    {"Ordem": 9, "Ponto": "Parada Encontro", "Tipo": "Parada"},
+    {"Ordem": 10, "Ponto": "Parada Cidade Vargas", "Tipo": "Parada"},
+    {"Ordem": 11, "Ponto": "Terminal Jabaquara", "Tipo": "Terminal"}
 ])
 
-st.dataframe(tabela, use_container_width=True, hide_index=True)
-
-
-# =========================
-# MAPA
-# =========================
-
-lat_float = converter_float(latitude)
-lon_float = converter_float(longitude)
-
-if lat_float is not None and lon_float is not None:
-    st.subheader("Localização no mapa")
-
-    mapa = pd.DataFrame([
-        {
-            "latitude": lat_float,
-            "longitude": lon_float
-        }
-    ])
-
-    st.map(
-        mapa,
-        latitude="latitude",
-        longitude="longitude",
-        zoom=14,
-        use_container_width=True
-    )
+st.dataframe(
+    paradas,
+    use_container_width=True,
+    hide_index=True
+)
