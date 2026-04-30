@@ -51,15 +51,21 @@ def ler_dados_reais():
     usuario, senha = obter_credenciais_mqtt()
 
     if not usuario or not senha:
-        return None, "Credenciais MQTT não configuradas no Streamlit Secrets."
+        return None
 
     resultado = {"payload": None}
 
-    def on_connect(client, userdata, flags, reason_code, properties=None):
-        client.subscribe(MQTT_TOPIC)
+    def on_connect(client, userdata, flags, reason_code=None, properties=None):
+        try:
+            client.subscribe(MQTT_TOPIC)
+        except Exception:
+            pass
 
     def on_message(client, userdata, msg):
-        resultado["payload"] = msg.payload.decode("utf-8")
+        try:
+            resultado["payload"] = msg.payload.decode("utf-8")
+        except Exception:
+            resultado["payload"] = None
 
     client_id = f"dashboard_next_{int(time.time() * 1000)}"
 
@@ -84,19 +90,19 @@ def ler_dados_reais():
 
         inicio = time.time()
 
-        while resultado["payload"] is None and time.time() - inicio < 6:
+        while resultado["payload"] is None and time.time() - inicio < 8:
             time.sleep(0.1)
 
         client.loop_stop()
         client.disconnect()
 
         if resultado["payload"]:
-            return json.loads(resultado["payload"]), None
+            return json.loads(resultado["payload"])
 
-        return None, "Nenhuma nova mensagem recebida neste ciclo."
+        return None
 
-    except Exception as erro:
-        return None, f"Erro na conexão MQTT: {erro}"
+    except Exception:
+        return None
 
 
 # =========================
@@ -129,6 +135,16 @@ def valor_texto(valor, padrao="Aguardando dados"):
         return padrao
 
     return valor
+
+
+def valor_coordenada(valor):
+    if valor is None:
+        return "Aguardando dados"
+
+    try:
+        return float(valor)
+    except Exception:
+        return "Aguardando dados"
 
 
 # =========================
@@ -205,18 +221,14 @@ if "historico_operacional" not in st.session_state:
 if "ultimo_dado_recebido" not in st.session_state:
     st.session_state["ultimo_dado_recebido"] = None
 
-if "ultimo_status_mqtt" not in st.session_state:
-    st.session_state["ultimo_status_mqtt"] = "Aguardando dados reais do Raspberry Pi via HiveMQ Cloud."
-
 
 # =========================
 # LEITURA DOS DADOS
 # =========================
-dados_reais, erro_mqtt = ler_dados_reais()
+dados_reais = ler_dados_reais()
 
 if dados_reais:
     st.session_state["ultimo_dado_recebido"] = dados_reais
-    st.session_state["ultimo_status_mqtt"] = "Dashboard conectado ao HiveMQ Cloud e recebendo dados reais do Raspberry Pi."
 
     chave_leitura = (
         f'{dados_reais.get("data", "")}_'
@@ -236,14 +248,6 @@ if dados_reais:
 
     st.session_state["historico_operacional"] = st.session_state["historico_operacional"][-100:]
 
-elif erro_mqtt:
-    if st.session_state["ultimo_dado_recebido"]:
-        st.session_state["ultimo_status_mqtt"] = (
-            "Sem nova mensagem neste ciclo. Exibindo o último dado recebido do Raspberry Pi."
-        )
-    else:
-        st.session_state["ultimo_status_mqtt"] = erro_mqtt
-
 
 dados_exibicao = st.session_state["ultimo_dado_recebido"]
 
@@ -252,7 +256,8 @@ dados_exibicao = st.session_state["ultimo_dado_recebido"]
 # STATUS ATUAL DO ÔNIBUS
 # =========================
 if dados_exibicao:
-    velocidade_numero = converter_velocidade(dados_exibicao.get("velocidade", "0 km/h"))
+    latitude_atual = valor_coordenada(dados_exibicao.get("latitude"))
+    longitude_atual = valor_coordenada(dados_exibicao.get("longitude"))
 
     status_bus = {
         "linha": "290 Diadema - Jabaquara",
@@ -260,10 +265,9 @@ if dados_exibicao:
         "sentido": valor_texto(dados_exibicao.get("sentido")),
         "trecho": valor_texto(dados_exibicao.get("trecho")),
         "horario": formatar_horario(dados_exibicao),
-        "latitude": dados_exibicao.get("latitude"),
-        "longitude": dados_exibicao.get("longitude"),
-        "velocidade": velocidade_numero,
-        "velocidade_texto": valor_texto(dados_exibicao.get("velocidade"), "0 km/h"),
+        "latitude": latitude_atual,
+        "longitude": longitude_atual,
+        "velocidade_texto": valor_texto(dados_exibicao.get("velocidade"), "Aguardando dados"),
         "situacao": valor_texto(dados_exibicao.get("situacao")),
         "embarque": "Aguardando dados",
         "desembarque": "Aguardando dados",
@@ -271,8 +275,8 @@ if dados_exibicao:
     }
 
     possui_coordenada_real = (
-        status_bus["latitude"] is not None
-        and status_bus["longitude"] is not None
+        isinstance(status_bus["latitude"], float)
+        and isinstance(status_bus["longitude"], float)
     )
 
 else:
@@ -284,7 +288,6 @@ else:
         "horario": "Aguardando dados",
         "latitude": "Aguardando dados",
         "longitude": "Aguardando dados",
-        "velocidade": 0.0,
         "velocidade_texto": "Aguardando dados",
         "situacao": "Aguardando dados",
         "embarque": "Aguardando dados",
@@ -328,15 +331,6 @@ df_operacional = pd.DataFrame(dados_tabela)
 # TÍTULO
 # =========================
 st.markdown('<div class="main-title">Painel de Controle Next Mobilidade</div>', unsafe_allow_html=True)
-
-
-# =========================
-# STATUS DA CONEXÃO
-# =========================
-if dados_exibicao:
-    st.success(st.session_state["ultimo_status_mqtt"])
-else:
-    st.info(st.session_state["ultimo_status_mqtt"])
 
 
 # =========================
@@ -439,23 +433,16 @@ with m1:
     mapa_df = paradas_df[["nome", "lat", "lon"]].assign(tipo="Paradas")
 
     if possui_coordenada_real:
-        try:
-            latitude_onibus = float(status_bus["latitude"])
-            longitude_onibus = float(status_bus["longitude"])
+        onibus_df = pd.DataFrame([
+            {
+                "nome": "Ônibus em operação",
+                "lat": status_bus["latitude"],
+                "lon": status_bus["longitude"],
+                "tipo": "Ônibus"
+            }
+        ])
 
-            onibus_df = pd.DataFrame([
-                {
-                    "nome": "Ônibus em operação",
-                    "lat": latitude_onibus,
-                    "lon": longitude_onibus,
-                    "tipo": "Ônibus"
-                }
-            ])
-
-            mapa_df = pd.concat([mapa_df, onibus_df], ignore_index=True)
-
-        except Exception:
-            pass
+        mapa_df = pd.concat([mapa_df, onibus_df], ignore_index=True)
 
     fig_mapa = px.scatter_mapbox(
         mapa_df,
