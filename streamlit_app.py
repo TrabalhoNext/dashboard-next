@@ -2,12 +2,12 @@ import json
 import time
 import ssl
 import html
-import math
 
 import streamlit as st
 import pandas as pd
 import paho.mqtt.client as mqtt
-import pydeck as pdk
+import folium
+from streamlit_folium import st_folium
 
 try:
     from streamlit_autorefresh import st_autorefresh
@@ -47,10 +47,6 @@ def obter_credenciais_mqtt():
         return None, None
 
 
-# =========================
-# LEITURA DOS DADOS VIA MQTT
-# =========================
-
 def criar_cliente_mqtt(client_id):
     try:
         return mqtt.Client(
@@ -89,7 +85,6 @@ def ler_dados_reais():
 
     try:
         client = criar_cliente_mqtt(client_id)
-
         client.username_pw_set(usuario, senha)
 
         try:
@@ -123,7 +118,7 @@ def ler_dados_reais():
 
 
 # =========================
-# PARADAS E TERMINAIS DA LINHA 290
+# PARADAS E TERMINAIS
 # =========================
 
 PARADAS = [
@@ -205,29 +200,6 @@ def converter_float(valor):
         return None
 
 
-def calcular_distancia_km(lat1, lon1, lat2, lon2):
-    raio_terra = 6371
-
-    lat1_rad = math.radians(lat1)
-    lon1_rad = math.radians(lon1)
-    lat2_rad = math.radians(lat2)
-    lon2_rad = math.radians(lon2)
-
-    diferenca_lat = lat2_rad - lat1_rad
-    diferenca_lon = lon2_rad - lon1_rad
-
-    a = (
-        math.sin(diferenca_lat / 2) ** 2
-        + math.cos(lat1_rad)
-        * math.cos(lat2_rad)
-        * math.sin(diferenca_lon / 2) ** 2
-    )
-
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-    return raio_terra * c
-
-
 def card(titulo, conteudo_html):
     st.markdown(
         f"""
@@ -283,38 +255,65 @@ def montar_tabela_operacional(dados, parada_atual, hora, embarque, desembarque, 
     return pd.DataFrame(linhas)
 
 
-def calcular_view_state_mapa(lat_onibus, lon_onibus):
-    pontos_lat = [p["latitude"] for p in PARADAS]
-    pontos_lon = [p["longitude"] for p in PARADAS]
+def criar_mapa(lat_onibus, lon_onibus):
+    lat_rota = [p["latitude"] for p in PARADAS]
+    lon_rota = [p["longitude"] for p in PARADAS]
+
+    centro_lat = sum(lat_rota) / len(lat_rota)
+    centro_lon = sum(lon_rota) / len(lon_rota)
+
+    mapa = folium.Map(
+        location=[centro_lat, centro_lon],
+        zoom_start=13,
+        tiles="OpenStreetMap",
+        control_scale=True
+    )
+
+    coordenadas_rota = [
+        [p["latitude"], p["longitude"]] for p in PARADAS
+    ]
+
+    folium.PolyLine(
+        coordenadas_rota,
+        color="#1a73e8",
+        weight=7,
+        opacity=0.9,
+        tooltip="Rota da linha 290"
+    ).add_to(mapa)
+
+    for parada in PARADAS:
+        cor = "#1a73e8"
+
+        if parada["tipo"] == "Terminal":
+            raio = 8
+        else:
+            raio = 6
+
+        folium.CircleMarker(
+            location=[parada["latitude"], parada["longitude"]],
+            radius=raio,
+            color="#ffffff",
+            weight=2,
+            fill=True,
+            fill_color=cor,
+            fill_opacity=1,
+            tooltip=f'{parada["nome"]} - {parada["tipo"]}'
+        ).add_to(mapa)
+
+    pontos_enquadramento = coordenadas_rota.copy()
 
     if lat_onibus is not None and lon_onibus is not None:
-        pontos_lat.append(lat_onibus)
-        pontos_lon.append(lon_onibus)
+        folium.Marker(
+            location=[lat_onibus, lon_onibus],
+            tooltip="Localização atual do ônibus",
+            icon=folium.Icon(color="red", icon="bus", prefix="fa")
+        ).add_to(mapa)
 
-    lat_min = min(pontos_lat)
-    lat_max = max(pontos_lat)
-    lon_min = min(pontos_lon)
-    lon_max = max(pontos_lon)
+        pontos_enquadramento.append([lat_onibus, lon_onibus])
 
-    centro_lat = (lat_min + lat_max) / 2
-    centro_lon = (lon_min + lon_max) / 2
+    mapa.fit_bounds(pontos_enquadramento, padding=(30, 30))
 
-    abertura = max(lat_max - lat_min, lon_max - lon_min)
-
-    if abertura <= 0.025:
-        zoom = 14
-    elif abertura <= 0.045:
-        zoom = 13
-    elif abertura <= 0.080:
-        zoom = 12
-    elif abertura <= 0.140:
-        zoom = 11
-    elif abertura <= 0.250:
-        zoom = 10
-    else:
-        zoom = 9
-
-    return centro_lat, centro_lon, zoom
+    return mapa
 
 
 # =========================
@@ -328,11 +327,16 @@ st.markdown(
             background-color: #ffffff;
         }
 
+        .block-container {
+            padding-top: 2.2rem;
+            padding-bottom: 2rem;
+        }
+
         h1 {
-            font-size: 36px !important;
+            font-size: 34px !important;
             font-weight: 800 !important;
             color: #2b2d3a !important;
-            margin-bottom: 24px !important;
+            margin-bottom: 22px !important;
         }
 
         h2, h3 {
@@ -342,25 +346,25 @@ st.markdown(
 
         .card {
             background: #f8f9fb;
-            border-radius: 15px;
-            padding: 16px 18px;
-            min-height: 120px;
-            box-shadow: 0px 5px 16px rgba(0,0,0,0.06);
-            margin-bottom: 16px;
+            border-radius: 14px;
+            padding: 15px 17px;
+            min-height: 105px;
+            box-shadow: 0px 5px 14px rgba(0,0,0,0.055);
+            margin-bottom: 15px;
         }
 
         .card-title {
             color: #5b5b5b;
             font-size: 15px;
             font-weight: 700;
-            margin-bottom: 10px;
+            margin-bottom: 9px;
         }
 
         .card-value {
             color: #171717;
-            font-size: 20px;
+            font-size: 19px;
             font-weight: 800;
-            line-height: 1.35;
+            line-height: 1.32;
         }
     </style>
     """,
@@ -447,13 +451,12 @@ with col7:
 with col8:
     fluxo_html = (
         f"Embarque: {texto_seguro(embarque)}<br>"
-        f"Desembarque: {texto_seguro(desembarque)}<br>"
-        f"Lotação atual: {texto_seguro(lotacao)}"
+        f"Desembarque: {texto_seguro(desembarque)}"
     )
     card("Fluxo de passageiros", fluxo_html)
 
 with col9:
-    st.empty()
+    card("Lotação atual", texto_seguro(lotacao))
 
 
 # =========================
@@ -487,82 +490,11 @@ st.subheader("Localização do ônibus e rota da linha 290")
 lat_onibus = converter_float(latitude)
 lon_onibus = converter_float(longitude)
 
-df_paradas = pd.DataFrame(PARADAS)
-df_paradas["tooltip"] = df_paradas["nome"] + " - " + df_paradas["tipo"]
+mapa = criar_mapa(lat_onibus, lon_onibus)
 
-rota_coordenadas = [
-    [p["longitude"], p["latitude"]] for p in PARADAS
-]
-
-camadas = [
-    pdk.Layer(
-        "PathLayer",
-        data=[
-            {
-                "path": rota_coordenadas,
-                "tooltip": "Rota cadastrada da linha 290"
-            }
-        ],
-        get_path="path",
-        get_width=7,
-        get_color=[0, 100, 230, 230],
-        width_min_pixels=5,
-        rounded=True,
-        pickable=True
-    ),
-    pdk.Layer(
-        "ScatterplotLayer",
-        data=df_paradas,
-        get_position="[longitude, latitude]",
-        get_radius=55,
-        get_fill_color=[255, 255, 255, 240],
-        get_line_color=[0, 100, 230, 230],
-        line_width_min_pixels=2,
-        stroked=True,
-        filled=True,
-        pickable=True
-    )
-]
-
-if lat_onibus is not None and lon_onibus is not None:
-    df_onibus = pd.DataFrame([
-        {
-            "latitude": lat_onibus,
-            "longitude": lon_onibus,
-            "tooltip": "Localização atual do ônibus"
-        }
-    ])
-
-    camadas.append(
-        pdk.Layer(
-            "ScatterplotLayer",
-            data=df_onibus,
-            get_position="[longitude, latitude]",
-            get_radius=120,
-            get_fill_color=[220, 40, 40, 240],
-            get_line_color=[255, 255, 255],
-            line_width_min_pixels=3,
-            stroked=True,
-            filled=True,
-            pickable=True
-        )
-    )
-
-centro_lat, centro_lon, zoom_mapa = calcular_view_state_mapa(lat_onibus, lon_onibus)
-
-view_state = pdk.ViewState(
-    latitude=centro_lat,
-    longitude=centro_lon,
-    zoom=zoom_mapa,
-    pitch=0
-)
-
-st.pydeck_chart(
-    pdk.Deck(
-        map_style="https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
-        initial_view_state=view_state,
-        layers=camadas,
-        tooltip={"text": "{tooltip}"}
-    ),
-    use_container_width=True
+st_folium(
+    mapa,
+    width=None,
+    height=520,
+    returned_objects=[]
 )
