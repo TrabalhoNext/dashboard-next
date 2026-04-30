@@ -6,6 +6,7 @@ import html
 import streamlit as st
 import pandas as pd
 import paho.mqtt.client as mqtt
+import pydeck as pdk
 
 try:
     from streamlit_autorefresh import st_autorefresh
@@ -23,7 +24,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Atualização automática a cada 3 minutos
+# Atualização automática do painel a cada 3 minutos
 if st_autorefresh:
     st_autorefresh(interval=180000, key="atualizacao_dashboard")
 
@@ -122,6 +123,91 @@ def ler_dados_reais():
 
 
 # =========================
+# PARADAS E TERMINAIS DA LINHA 290
+# =========================
+
+PARADAS = [
+    {
+        "ordem": 1,
+        "nome": "Terminal Diadema",
+        "tipo": "Terminal",
+        "latitude": -23.682681458564325,
+        "longitude": -46.62691332328152
+    },
+    {
+        "ordem": 2,
+        "nome": "Parada Assembleia",
+        "tipo": "Parada",
+        "latitude": -23.67697409771605,
+        "longitude": -46.627793033156586
+    },
+    {
+        "ordem": 3,
+        "nome": "Parada Divisa",
+        "tipo": "Parada",
+        "latitude": -23.673551659194004,
+        "longitude": -46.63089933449298
+    },
+    {
+        "ordem": 4,
+        "nome": "Parada Vila Clara",
+        "tipo": "Parada",
+        "latitude": -23.670446876785558,
+        "longitude": -46.63259010672355
+    },
+    {
+        "ordem": 5,
+        "nome": "Parada Bom Clima",
+        "tipo": "Parada",
+        "latitude": -23.669120531442708,
+        "longitude": -46.63486429031358
+    },
+    {
+        "ordem": 6,
+        "nome": "Parada São José",
+        "tipo": "Parada",
+        "latitude": -23.664882066923965,
+        "longitude": -46.63779830145058
+    },
+    {
+        "ordem": 7,
+        "nome": "Parada Americanópolis",
+        "tipo": "Parada",
+        "latitude": -23.66095067269106,
+        "longitude": -46.637240408622645
+    },
+    {
+        "ordem": 8,
+        "nome": "Parada Faccini",
+        "tipo": "Parada",
+        "latitude": -23.656897096071692,
+        "longitude": -46.63611395876546
+    },
+    {
+        "ordem": 9,
+        "nome": "Parada Encontro",
+        "tipo": "Parada",
+        "latitude": -23.652614165456484,
+        "longitude": -46.63710571915031
+    },
+    {
+        "ordem": 10,
+        "nome": "Parada Cidade Vargas",
+        "tipo": "Parada",
+        "latitude": -23.648791349310596,
+        "longitude": -46.64064538509645
+    },
+    {
+        "ordem": 11,
+        "nome": "Terminal Jabaquara",
+        "tipo": "Terminal",
+        "latitude": -23.646183664190886,
+        "longitude": -46.639878302287805
+    },
+]
+
+
+# =========================
 # FUNÇÕES AUXILIARES
 # =========================
 
@@ -140,6 +226,7 @@ def obter_valor(dados, chave):
 def texto_seguro(valor):
     if valor is None or valor == "":
         return "Aguardando dados"
+
     return html.escape(str(valor))
 
 
@@ -162,6 +249,13 @@ def velocidade_numerica(valor):
         return 0.0
 
 
+def converter_float(valor):
+    try:
+        return float(valor)
+    except Exception:
+        return None
+
+
 def card(titulo, conteudo_html):
     st.markdown(
         f"""
@@ -172,6 +266,34 @@ def card(titulo, conteudo_html):
         """,
         unsafe_allow_html=True
     )
+
+
+def montar_tabela_operacional(parada_atual, hora, embarque, desembarque, lotacao):
+    linhas = []
+
+    for parada in PARADAS:
+        nome = parada["nome"]
+
+        if parada_atual == nome:
+            horario_linha = hora
+            embarque_linha = embarque
+            desembarque_linha = desembarque
+            lotacao_linha = lotacao
+        else:
+            horario_linha = "Aguardando dados"
+            embarque_linha = "Aguardando dados"
+            desembarque_linha = "Aguardando dados"
+            lotacao_linha = "Aguardando dados"
+
+        linhas.append({
+            "Parada / Terminal": nome,
+            "Horário": horario_linha,
+            "Embarque": embarque_linha,
+            "Desembarque": desembarque_linha,
+            "Pessoas no Ônibus": lotacao_linha
+        })
+
+    return pd.DataFrame(linhas)
 
 
 # =========================
@@ -186,10 +308,10 @@ st.markdown(
         }
 
         h1 {
-            font-size: 42px !important;
+            font-size: 40px !important;
             font-weight: 800 !important;
             color: #2b2d3a !important;
-            margin-bottom: 30px !important;
+            margin-bottom: 28px !important;
         }
 
         h2, h3 {
@@ -199,25 +321,25 @@ st.markdown(
 
         .card {
             background: #f8f9fb;
-            border-radius: 18px;
-            padding: 26px;
-            min-height: 135px;
-            box-shadow: 0px 8px 24px rgba(0,0,0,0.08);
-            margin-bottom: 22px;
+            border-radius: 16px;
+            padding: 20px 22px;
+            min-height: 115px;
+            box-shadow: 0px 6px 18px rgba(0,0,0,0.07);
+            margin-bottom: 18px;
         }
 
         .card-title {
             color: #5b5b5b;
-            font-size: 18px;
+            font-size: 17px;
             font-weight: 700;
-            margin-bottom: 18px;
+            margin-bottom: 12px;
         }
 
         .card-value {
             color: #171717;
-            font-size: 24px;
+            font-size: 22px;
             font-weight: 800;
-            line-height: 1.5;
+            line-height: 1.35;
         }
     </style>
     """,
@@ -263,7 +385,7 @@ else:
 
 
 # =========================
-# DASHBOARD
+# DASHBOARD - CARDS
 # =========================
 
 st.title("Painel de Controle Next Mobilidade")
@@ -296,7 +418,7 @@ with col6:
     card("Localização", localizacao_html)
 
 
-col7, col8, col9 = st.columns(3)
+col7, col8 = st.columns([1, 2])
 
 with col7:
     card("Velocidade", texto_seguro(velocidade))
@@ -304,36 +426,114 @@ with col7:
 with col8:
     fluxo_html = (
         f"Embarque: {texto_seguro(embarque)}<br>"
-        f"Desembarque: {texto_seguro(desembarque)}"
+        f"Desembarque: {texto_seguro(desembarque)}<br>"
+        f"Lotação atual: {texto_seguro(lotacao)}"
     )
     card("Fluxo de passageiros", fluxo_html)
 
-with col9:
-    card("Pessoas no ônibus", texto_seguro(lotacao))
-
 
 # =========================
-# TABELA DAS PARADAS
+# TABELA OPERACIONAL
 # =========================
 
-st.subheader("Paradas e terminais cadastrados")
+st.subheader("Controle de passageiros por parada")
 
-paradas = pd.DataFrame([
-    {"Ordem": 1, "Ponto": "Terminal Diadema", "Tipo": "Terminal"},
-    {"Ordem": 2, "Ponto": "Parada Assembleia", "Tipo": "Parada"},
-    {"Ordem": 3, "Ponto": "Parada Divisa", "Tipo": "Parada"},
-    {"Ordem": 4, "Ponto": "Parada Vila Clara", "Tipo": "Parada"},
-    {"Ordem": 5, "Ponto": "Parada Bom Clima", "Tipo": "Parada"},
-    {"Ordem": 6, "Ponto": "Parada São José", "Tipo": "Parada"},
-    {"Ordem": 7, "Ponto": "Parada Americanópolis", "Tipo": "Parada"},
-    {"Ordem": 8, "Ponto": "Parada Faccini", "Tipo": "Parada"},
-    {"Ordem": 9, "Ponto": "Parada Encontro", "Tipo": "Parada"},
-    {"Ordem": 10, "Ponto": "Parada Cidade Vargas", "Tipo": "Parada"},
-    {"Ordem": 11, "Ponto": "Terminal Jabaquara", "Tipo": "Terminal"}
-])
+tabela = montar_tabela_operacional(
+    parada_atual=parada_atual,
+    hora=hora,
+    embarque=embarque,
+    desembarque=desembarque,
+    lotacao=lotacao
+)
 
 st.dataframe(
-    paradas,
+    tabela,
     use_container_width=True,
     hide_index=True
+)
+
+
+# =========================
+# MAPA POR ÚLTIMO
+# =========================
+
+st.subheader("Localização do ônibus e rota da linha 290")
+
+lat_onibus = converter_float(latitude)
+lon_onibus = converter_float(longitude)
+
+df_paradas = pd.DataFrame(PARADAS)
+df_paradas["tooltip"] = df_paradas["nome"] + " - " + df_paradas["tipo"]
+
+rota_coordenadas = [
+    [p["longitude"], p["latitude"]] for p in PARADAS
+]
+
+camadas = [
+    pdk.Layer(
+        "PathLayer",
+        data=[
+            {
+                "path": rota_coordenadas,
+                "tooltip": "Rota da linha 290"
+            }
+        ],
+        get_path="path",
+        get_width=5,
+        get_color=[0, 90, 200],
+        pickable=True
+    ),
+    pdk.Layer(
+        "ScatterplotLayer",
+        data=df_paradas,
+        get_position="[longitude, latitude]",
+        get_radius=65,
+        get_fill_color=[30, 120, 220],
+        pickable=True
+    )
+]
+
+if lat_onibus is not None and lon_onibus is not None:
+    df_onibus = pd.DataFrame([
+        {
+            "latitude": lat_onibus,
+            "longitude": lon_onibus,
+            "tooltip": "Localização atual do ônibus"
+        }
+    ])
+
+    camadas.append(
+        pdk.Layer(
+            "ScatterplotLayer",
+            data=df_onibus,
+            get_position="[longitude, latitude]",
+            get_radius=120,
+            get_fill_color=[220, 40, 40],
+            pickable=True
+        )
+    )
+
+    centro_lat = lat_onibus
+    centro_lon = lon_onibus
+    zoom_mapa = 13
+else:
+    centro_lat = -23.664
+    centro_lon = -46.635
+    zoom_mapa = 12
+
+view_state = pdk.ViewState(
+    latitude=centro_lat,
+    longitude=centro_lon,
+    zoom=zoom_mapa,
+    pitch=0
+)
+
+st.pydeck_chart(
+    pdk.Deck(
+        map_style=None,
+        initial_view_state=view_state,
+        layers=camadas,
+        tooltip={"text": "{tooltip}"}
+    ),
+    use_container_width=True
 )
