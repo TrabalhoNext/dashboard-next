@@ -25,11 +25,14 @@ st.set_page_config(
     layout="wide"
 )
 
-MQTT_BROKER = "broker.hivemq.com"
-MQTT_PORT = 1883
-MQTT_TOPIC = "next/linha290/gps"
+MQTT_BROKER = st.secrets["mqtt"]["broker"]
+MQTT_PORT = int(st.secrets["mqtt"]["porta"])
+MQTT_TOPIC = st.secrets["mqtt"]["topico"]
+MQTT_USUARIO = st.secrets["mqtt"]["usuario"]
+MQTT_SENHA = st.secrets["mqtt"]["senha"]
 
 INTERVALO_ATUALIZACAO = 3  # segundos
+RAIO_PARADA_METROS = 30    # metros
 
 
 # ============================================================
@@ -143,13 +146,6 @@ def agora_sao_paulo():
 
 
 def converter_data_hora_para_sao_paulo(data_valor, hora_valor):
-    """
-    Corrige a hora para o fuso de São Paulo.
-
-    Quando o payload recebe hora em UTC, por exemplo 20:37:29,
-    o dashboard converte para 17:37:29 no horário de São Paulo.
-    """
-
     if not hora_valor or hora_valor == "Aguardando dados":
         return data_valor, hora_valor
 
@@ -163,31 +159,14 @@ def converter_data_hora_para_sao_paulo(data_valor, hora_valor):
             if data_hora.tzinfo is None:
                 data_hora = data_hora.replace(tzinfo=timezone.utc)
 
-        else:
-            if data_valor and data_valor != "Aguardando dados":
-                try:
-                    data_base = datetime.strptime(str(data_valor), "%d/%m/%Y").date()
-                except Exception:
-                    data_base = agora_sao_paulo().date()
+            if ZoneInfo is not None:
+                data_hora_sp = data_hora.astimezone(ZoneInfo("America/Sao_Paulo"))
             else:
-                data_base = agora_sao_paulo().date()
+                data_hora_sp = data_hora.astimezone(timezone(timedelta(hours=-3)))
 
-            partes = texto_hora.split(":")
-            hora = int(partes[0])
-            minuto = int(partes[1]) if len(partes) > 1 else 0
-            segundo = int(float(partes[2])) if len(partes) > 2 else 0
+            return data_hora_sp.strftime("%d/%m/%Y"), data_hora_sp.strftime("%H:%M:%S")
 
-            data_hora = datetime.combine(
-                data_base,
-                dt_time(hora, minuto, segundo)
-            ).replace(tzinfo=timezone.utc)
-
-        if ZoneInfo is not None:
-            data_hora_sp = data_hora.astimezone(ZoneInfo("America/Sao_Paulo"))
-        else:
-            data_hora_sp = data_hora.astimezone(timezone(timedelta(hours=-3)))
-
-        return data_hora_sp.strftime("%d/%m/%Y"), data_hora_sp.strftime("%H:%M:%S")
+        return data_valor, hora_valor
 
     except Exception:
         return data_valor, hora_valor
@@ -279,8 +258,6 @@ def interpretar_posicao(latitude, longitude, velocidade):
 
     st.session_state["ultimo_indice_parada"] = indice_atual
 
-    RAIO_PARADA_METROS = 30
-
     if velocidade <= 5 and distancia <= RAIO_PARADA_METROS:
         parada_atual = parada["nome"]
         situacao = "Parado"
@@ -303,6 +280,16 @@ def interpretar_posicao(latitude, longitude, velocidade):
     }
 
 
+def codigo_reason_code(reason_code):
+    try:
+        return int(reason_code)
+    except Exception:
+        texto = str(reason_code).lower()
+        if "success" in texto or texto == "0":
+            return 0
+        return -1
+
+
 # ============================================================
 # MQTT
 # ============================================================
@@ -315,24 +302,28 @@ class EstadoMQTT:
         self.erro = ""
         self.conectado = False
 
-    def on_connect(self, client, userdata, flags, rc):
-        with self.lock:
-            self.conectado = rc == 0
+    def on_connect(self, client, userdata, flags, reason_code, properties):
+        codigo = codigo_reason_code(reason_code)
 
-            if rc == 0:
+        with self.lock:
+            self.conectado = codigo == 0
+
+            if codigo == 0:
                 self.erro = ""
             else:
-                self.erro = f"Falha de conexão MQTT. Código: {rc}"
+                self.erro = f"Falha de conexão MQTT. Código: {reason_code}"
 
-        if rc == 0:
+        if codigo == 0:
             client.subscribe(MQTT_TOPIC)
 
-    def on_disconnect(self, client, userdata, rc):
+    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+        codigo = codigo_reason_code(reason_code)
+
         with self.lock:
             self.conectado = False
 
-            if rc != 0:
-                self.erro = f"MQTT desconectado inesperadamente. Código: {rc}"
+            if codigo != 0:
+                self.erro = f"MQTT desconectado inesperadamente. Código: {reason_code}"
 
     def on_message(self, client, userdata, msg):
         try:
@@ -362,7 +353,14 @@ class EstadoMQTT:
 def iniciar_mqtt():
     estado = EstadoMQTT()
 
-    client = mqtt.Client()
+    client = mqtt.Client(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        client_id=f"dashboard_next_{int(time.time())}"
+    )
+
+    client.username_pw_set(MQTT_USUARIO, MQTT_SENHA)
+    client.tls_set()
+
     client.on_connect = estado.on_connect
     client.on_disconnect = estado.on_disconnect
     client.on_message = estado.on_message
@@ -504,23 +502,13 @@ data = obter_valor(
     "Aguardando dados"
 )
 
-hora_local = obter_valor(
+hora = obter_valor(
     payload,
-    ["hora_brasil", "hora_local"],
-    None
+    ["hora_local", "hora_brasil", "hora", "time"],
+    "Aguardando dados"
 )
 
-if hora_local is not None:
-    hora = hora_local
-else:
-    hora = obter_valor(
-        payload,
-        ["hora", "time"],
-        "Aguardando dados"
-    )
-
-    data, hora = converter_data_hora_para_sao_paulo(data, hora)
-
+data, hora = converter_data_hora_para_sao_paulo(data, hora)
 
 embarque = obter_valor(
     payload,
@@ -666,7 +654,7 @@ st.subheader("Tabela operacional da linha")
 
 st.dataframe(
     st.session_state["tabela_linha"],
-    use_container_width=True,
+    width="stretch",
     hide_index=True
 )
 
@@ -693,6 +681,7 @@ st_folium(
 
 with st.expander("Status técnico MQTT"):
     st.write("Broker:", MQTT_BROKER)
+    st.write("Porta:", MQTT_PORT)
     st.write("Tópico:", MQTT_TOPIC)
     st.write("Conectado:", "Sim" if snapshot["conectado"] else "Não")
     st.write("Última mensagem recebida:", snapshot["ultima_mensagem"])
