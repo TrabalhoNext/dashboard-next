@@ -203,11 +203,7 @@ class EstadoMQTT:
 
         with self.lock:
             self.conectado = codigo == 0
-
-            if codigo == 0:
-                self.erro = ""
-            else:
-                self.erro = f"Falha de conexão MQTT. Código: {reason_code}"
+            self.erro = "" if codigo == 0 else f"Falha de conexão MQTT. Código: {reason_code}"
 
         if codigo == 0:
             client.subscribe(MQTT_TOPIC)
@@ -217,7 +213,6 @@ class EstadoMQTT:
 
         with self.lock:
             self.conectado = False
-
             if codigo != 0:
                 self.erro = f"MQTT desconectado inesperadamente. Código: {reason_code}"
 
@@ -378,6 +373,7 @@ st.markdown(
 
 # ============================================================
 # INTERFACE
+# SOMENTE 4 CARDS
 # ============================================================
 
 st.title("Painel Básico Next Mobilidade")
