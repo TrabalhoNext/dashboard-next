@@ -1,4 +1,3 @@
-
 import json
 import time
 import math
@@ -17,6 +16,7 @@ import paho.mqtt.client as mqtt
 import folium
 from streamlit_folium import st_folium
 
+
 # ============================================================
 # CONFIGURAÇÕES GERAIS
 # ============================================================
@@ -26,7 +26,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Acessando segredos
 MQTT_BROKER = st.secrets["mqtt"]["broker"]
 MQTT_PORT = int(st.secrets["mqtt"]["porta"])
 MQTT_TOPIC = st.secrets["mqtt"]["topico"]
@@ -34,11 +33,15 @@ MQTT_USUARIO = st.secrets["mqtt"]["usuario"]
 MQTT_SENHA = st.secrets["mqtt"]["senha"]
 
 INTERVALO_ATUALIZACAO = 3
+
+RAIO_PARADA_ATUAL_METROS = 15
 RAIO_SAIDA_TERMINAL_METROS = 10
 VELOCIDADE_MINIMA_SENTIDO = 2
 
+
 # ============================================================
 # PARADAS DA LINHA 290
+# FORMATO: LATITUDE, LONGITUDE
 # ============================================================
 
 PARADAS = [
@@ -55,182 +58,807 @@ PARADAS = [
     {"nome": "Terminal Jabaquara", "lat": -23.646183664190886, "lon": -46.639878302287805},
 ]
 
+
 # ============================================================
-# CLASSE DE ESTADO MQTT (CORRIGIDA)
+# FUNÇÕES AUXILIARES
+# ============================================================
+
+def obter_valor(dados, chaves, padrao=None):
+    for chave in chaves:
+        valor = dados.get(chave)
+        if valor is not None and valor != "":
+            return valor
+    return padrao
+
+
+def converter_float(valor):
+    if valor is None or valor == "" or valor == "Aguardando dados":
+        return None
+
+    try:
+        if isinstance(valor, str):
+            valor = (
+                valor.replace("km/h", "")
+                .replace("km", "")
+                .replace("°", "")
+                .replace(",", ".")
+                .strip()
+            )
+        return float(valor)
+    except Exception:
+        return None
+
+
+def valor_tabela(valor):
+    if valor is None or valor == "" or valor == "Aguardando dados":
+        return ""
+    return str(valor)
+
+
+def agora_sao_paulo():
+    if ZoneInfo is not None:
+        return datetime.now(ZoneInfo("America/Sao_Paulo"))
+    return datetime.utcnow() - timedelta(hours=3)
+
+
+def ajustar_data_hora(data_valor, hora_valor):
+    if not data_valor:
+        data_valor = "Aguardando dados"
+
+    if not hora_valor:
+        hora_valor = "Aguardando dados"
+
+    try:
+        hora_texto = str(hora_valor).strip()
+
+        if "T" in hora_texto:
+            data_hora = datetime.fromisoformat(hora_texto.replace("Z", "+00:00"))
+
+            if data_hora.tzinfo is None:
+                data_hora = data_hora.replace(tzinfo=timezone.utc)
+
+            if ZoneInfo is not None:
+                data_hora = data_hora.astimezone(ZoneInfo("America/Sao_Paulo"))
+            else:
+                data_hora = data_hora.astimezone(timezone(timedelta(hours=-3)))
+
+            return data_hora.strftime("%d/%m/%Y"), data_hora.strftime("%H:%M:%S")
+
+        return str(data_valor), str(hora_valor)
+
+    except Exception:
+        return str(data_valor), str(hora_valor)
+
+
+def calcular_distancia_metros(lat1, lon1, lat2, lon2):
+    raio_terra = 6371000
+
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    )
+
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    return raio_terra * c
+
+
+def encontrar_parada_mais_proxima(latitude, longitude):
+    menor_distancia = float("inf")
+    parada_mais_proxima = None
+    indice_mais_proximo = None
+
+    for indice, parada in enumerate(PARADAS):
+        distancia = calcular_distancia_metros(
+            latitude,
+            longitude,
+            parada["lat"],
+            parada["lon"]
+        )
+
+        if distancia < menor_distancia:
+            menor_distancia = distancia
+            parada_mais_proxima = parada
+            indice_mais_proximo = indice
+
+    return parada_mais_proxima, indice_mais_proximo, menor_distancia
+
+
+def converter_para_xy_metros(lat, lon, lat_ref, lon_ref):
+    raio_terra = 6371000
+
+    x = math.radians(lon - lon_ref) * raio_terra * math.cos(math.radians(lat_ref))
+    y = math.radians(lat - lat_ref) * raio_terra
+
+    return x, y
+
+
+def calcular_progresso_rota(latitude, longitude):
+    lat_ref = PARADAS[0]["lat"]
+    lon_ref = PARADAS[0]["lon"]
+
+    px, py = converter_para_xy_metros(latitude, longitude, lat_ref, lon_ref)
+
+    melhor_distancia = float("inf")
+    melhor_indice = 0
+    melhor_progresso = 0
+
+    progresso_acumulado = 0
+
+    for i in range(len(PARADAS) - 1):
+        p1 = PARADAS[i]
+        p2 = PARADAS[i + 1]
+
+        x1, y1 = converter_para_xy_metros(p1["lat"], p1["lon"], lat_ref, lon_ref)
+        x2, y2 = converter_para_xy_metros(p2["lat"], p2["lon"], lat_ref, lon_ref)
+
+        dx = x2 - x1
+        dy = y2 - y1
+
+        comprimento_segmento = math.sqrt(dx ** 2 + dy ** 2)
+
+        if comprimento_segmento == 0:
+            continue
+
+        t = ((px - x1) * dx + (py - y1) * dy) / (comprimento_segmento ** 2)
+        t = max(0, min(1, t))
+
+        proj_x = x1 + t * dx
+        proj_y = y1 + t * dy
+
+        distancia_segmento = math.sqrt((px - proj_x) ** 2 + (py - proj_y) ** 2)
+        progresso_ponto = progresso_acumulado + (t * comprimento_segmento)
+
+        if distancia_segmento < melhor_distancia:
+            melhor_distancia = distancia_segmento
+            melhor_indice = i
+            melhor_progresso = progresso_ponto
+
+        progresso_acumulado += comprimento_segmento
+
+    origem = PARADAS[melhor_indice]["nome"]
+    destino = PARADAS[melhor_indice + 1]["nome"]
+
+    trecho = f"Entre {origem} e {destino}"
+
+    return trecho, melhor_indice, melhor_progresso, melhor_distancia
+
+
+def identificar_parada_atual(latitude, longitude):
+    parada, indice, distancia = encontrar_parada_mais_proxima(latitude, longitude)
+
+    if distancia <= RAIO_PARADA_ATUAL_METROS:
+        return parada["nome"], indice, distancia
+
+    return "Em rota", indice, distancia
+
+
+def normalizar_angulo(graus):
+    if graus is None:
+        return None
+    return graus % 360
+
+
+def diferenca_angular(angulo1, angulo2):
+    return abs((angulo1 - angulo2 + 180) % 360 - 180)
+
+
+def calcular_bearing(lat1, lon1, lat2, lon2):
+    lat1_rad = math.radians(lat1)
+    lat2_rad = math.radians(lat2)
+
+    delta_lon = math.radians(lon2 - lon1)
+
+    x = math.sin(delta_lon) * math.cos(lat2_rad)
+
+    y = (
+        math.cos(lat1_rad) * math.sin(lat2_rad)
+        - math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(delta_lon)
+    )
+
+    bearing = math.degrees(math.atan2(x, y))
+
+    return normalizar_angulo(bearing)
+
+
+def obter_heading_payload(payload):
+    heading = converter_float(
+        obter_valor(
+            payload,
+            [
+                "heading",
+                "course",
+                "bearing",
+                "direcao",
+                "direção",
+                "rumo",
+                "azimute",
+                "gps_heading",
+                "gps_course"
+            ]
+        )
+    )
+
+    if heading is None:
+        return None
+
+    return normalizar_angulo(heading)
+
+
+def identificar_sentido(
+    latitude,
+    longitude,
+    progresso_atual,
+    indice_trecho=None,
+    heading=None,
+    velocidade=None
+):
+    terminal_diadema = PARADAS[0]
+    terminal_jabaquara = PARADAS[-1]
+
+    if velocidade is None:
+        velocidade = 0
+
+    distancia_diadema = calcular_distancia_metros(
+        latitude,
+        longitude,
+        terminal_diadema["lat"],
+        terminal_diadema["lon"]
+    )
+
+    distancia_jabaquara = calcular_distancia_metros(
+        latitude,
+        longitude,
+        terminal_jabaquara["lat"],
+        terminal_jabaquara["lon"]
+    )
+
+    if distancia_diadema <= RAIO_SAIDA_TERMINAL_METROS:
+        st.session_state["terminal_referencia"] = "diadema"
+        st.session_state["sentido_atual"] = "Aguardando saída do Terminal Diadema"
+        return st.session_state["sentido_atual"]
+
+    if distancia_jabaquara <= RAIO_SAIDA_TERMINAL_METROS:
+        st.session_state["terminal_referencia"] = "jabaquara"
+        st.session_state["sentido_atual"] = "Aguardando saída do Terminal Jabaquara"
+        return st.session_state["sentido_atual"]
+
+    terminal_referencia = st.session_state.get("terminal_referencia")
+
+    if terminal_referencia == "diadema" and distancia_diadema > RAIO_SAIDA_TERMINAL_METROS:
+        st.session_state["sentido_atual"] = "Sentido Terminal Jabaquara"
+
+    elif terminal_referencia == "jabaquara" and distancia_jabaquara > RAIO_SAIDA_TERMINAL_METROS:
+        st.session_state["sentido_atual"] = "Sentido Terminal Diadema"
+
+    if (
+        heading is not None
+        and indice_trecho is not None
+        and 0 <= indice_trecho < len(PARADAS) - 1
+        and velocidade >= VELOCIDADE_MINIMA_SENTIDO
+    ):
+        parada_origem = PARADAS[indice_trecho]
+        parada_destino = PARADAS[indice_trecho + 1]
+
+        bearing_sentido_jabaquara = calcular_bearing(
+            parada_origem["lat"],
+            parada_origem["lon"],
+            parada_destino["lat"],
+            parada_destino["lon"]
+        )
+
+        bearing_sentido_diadema = normalizar_angulo(
+            bearing_sentido_jabaquara + 180
+        )
+
+        diferenca_jabaquara = diferenca_angular(
+            heading,
+            bearing_sentido_jabaquara
+        )
+
+        diferenca_diadema = diferenca_angular(
+            heading,
+            bearing_sentido_diadema
+        )
+
+        if min(diferenca_jabaquara, diferenca_diadema) <= 75:
+            if diferenca_jabaquara <= diferenca_diadema:
+                st.session_state["sentido_atual"] = "Sentido Terminal Jabaquara"
+            else:
+                st.session_state["sentido_atual"] = "Sentido Terminal Diadema"
+
+            return st.session_state["sentido_atual"]
+
+    progresso_anterior = st.session_state.get("progresso_rota_anterior")
+
+    if progresso_anterior is not None and velocidade >= VELOCIDADE_MINIMA_SENTIDO:
+        diferenca_progresso = progresso_atual - progresso_anterior
+
+        if diferenca_progresso > RAIO_SAIDA_TERMINAL_METROS:
+            st.session_state["sentido_atual"] = "Sentido Terminal Jabaquara"
+
+        elif diferenca_progresso < -RAIO_SAIDA_TERMINAL_METROS:
+            st.session_state["sentido_atual"] = "Sentido Terminal Diadema"
+
+    return st.session_state.get("sentido_atual", "Aguardando deslocamento")
+
+
+def codigo_reason_code(reason_code):
+    try:
+        return int(reason_code)
+    except Exception:
+        texto = str(reason_code).lower()
+        if "success" in texto or texto == "0":
+            return 0
+        return -1
+
+
+def exibir_card(titulo, valor):
+    titulo = html.escape(str(titulo))
+    valor = html.escape(str(valor)).replace("\n", "<br>")
+
+    st.markdown(
+        f"""
+        <div class="card-next">
+            <div class="card-title-next">{titulo}</div>
+            <div class="card-value-next">{valor}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+# ============================================================
+# MQTT
 # ============================================================
 
 class EstadoMQTT:
     def __init__(self):
         self.lock = threading.Lock()
         self.payload = {}
-        self.ultima_msg = "Aguardando dados..."
+        self.ultima_mensagem = "Aguardando dados"
         self.erro = ""
         self.conectado = False
+        self.client = None
 
-    def on_connect(self, client, userdata, flags, rc, props=None):
+    def on_connect(self, client, userdata, flags, reason_code, properties):
+        codigo = codigo_reason_code(reason_code)
+
         with self.lock:
-            self.conectado = (rc == 0)
-        if rc == 0:
+            self.conectado = codigo == 0
+
+            if codigo == 0:
+                self.erro = ""
+            else:
+                self.erro = f"Falha de conexão MQTT. Código: {reason_code}"
+
+        if codigo == 0:
             client.subscribe(MQTT_TOPIC)
+
+    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+        codigo = codigo_reason_code(reason_code)
+
+        with self.lock:
+            self.conectado = False
+
+            if codigo != 0:
+                self.erro = f"MQTT desconectado inesperadamente. Código: {reason_code}"
 
     def on_message(self, client, userdata, msg):
         try:
-            dados = json.loads(msg.payload.decode())
+            texto = msg.payload.decode("utf-8")
+            dados = json.loads(texto)
+
             with self.lock:
                 self.payload = dados
-                self.ultima_msg = datetime.now().strftime("%H:%M:%S")
+                self.ultima_mensagem = agora_sao_paulo().strftime("%d/%m/%Y %H:%M:%S")
                 self.erro = ""
-        except Exception as e:
+
+        except Exception as erro:
             with self.lock:
-                self.erro = str(e)
+                self.erro = f"Erro ao ler payload MQTT: {erro}"
 
     def snapshot(self):
         with self.lock:
-            # Retorna uma cópia segura dos dados atuais
             return {
-                "payload": self.payload.copy() if self.payload else {},
-                "ultima_mensagem": self.ultima_msg,
+                "payload": dict(self.payload),
+                "ultima_mensagem": self.ultima_mensagem,
                 "erro": self.erro,
                 "conectado": self.conectado
             }
 
+
 @st.cache_resource
-def iniciar_conexao_mqtt_v2(): # Renomeado para limpar o cache antigo
-    est = EstadoMQTT()
-    cli = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
-    cli.username_pw_set(MQTT_USUARIO, MQTT_SENHA)
-    cli.tls_set()
-    cli.on_connect = est.on_connect
-    cli.on_message = est.on_message
-    cli.connect_async(MQTT_BROKER, MQTT_PORT, 30)
-    cli.loop_start()
-    return est
+def iniciar_mqtt():
+    estado = EstadoMQTT()
+
+    client = mqtt.Client(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        client_id=f"dashboard_next_{int(time.time())}"
+    )
+
+    client.username_pw_set(MQTT_USUARIO, MQTT_SENHA)
+    client.tls_set()
+
+    client.on_connect = estado.on_connect
+    client.on_disconnect = estado.on_disconnect
+    client.on_message = estado.on_message
+
+    client.connect_async(MQTT_BROKER, MQTT_PORT, 30)
+    client.loop_start()
+
+    estado.client = client
+
+    return estado
+
 
 # ============================================================
-# LÓGICA DE CÁLCULOS
+# TABELA OPERACIONAL
 # ============================================================
 
-def obter_valor(dados, chaves, padrao=None):
-    for chave in chaves:
-        valor = dados.get(chave)
-        if valor is not None and valor != "": return valor
-    return padrao
+def criar_tabela_operacional(
+    data_hora,
+    indice_atual,
+    embarque_atual="",
+    desembarque_atual="",
+    lotacao_atual=""
+):
+    linhas = []
 
-def converter_float(valor):
-    if valor in [None, "", "Aguardando dados"]: return None
-    try:
-        if isinstance(valor, str):
-            valor = valor.replace("km/h", "").replace("km", "").replace(",", ".").strip()
-        return float(valor)
-    except: return None
+    for indice, parada in enumerate(PARADAS):
+        if indice_atual is not None and indice == indice_atual:
+            data_hora_linha = "" if data_hora == "Aguardando dados" else data_hora
+            embarque_linha = embarque_atual
+            desembarque_linha = desembarque_atual
+            lotacao_linha = lotacao_atual
+        else:
+            data_hora_linha = ""
+            embarque_linha = ""
+            desembarque_linha = ""
+            lotacao_linha = ""
 
-def calcular_distancia(lat1, lon1, lat2, lon2):
-    r = 6371000
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi, dlon = math.radians(lat2-lat1), math.radians(lon2-lon1)
-    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlon/2)**2
-    return r * (2 * math.atan2(math.sqrt(a), math.sqrt(1-a)))
+        linhas.append({
+            "Data e Hora": data_hora_linha,
+            "Terminal / Parada": parada["nome"],
+            "Embarque": embarque_linha,
+            "Desembarque": desembarque_linha,
+            "Lotação Atual": lotacao_linha
+        })
 
-def calcular_progresso(lat, lon):
-    lat_ref, lon_ref = PARADAS[0]["lat"], PARADAS[0]["lon"]
-    def to_xy(la, lo):
-        x = math.radians(lo - lon_ref) * 6371000 * math.cos(math.radians(lat_ref))
-        y = math.radians(la - lat_ref) * 6371000
-        return x, y
-    px, py = to_xy(lat, lon)
-    m_dist, m_idx, prog_acum = float("inf"), 0, 0
-    m_prog = 0
-    for i in range(len(PARADAS)-1):
-        x1, y1 = to_xy(PARADAS[i]["lat"], PARADAS[i]["lon"])
-        x2, y2 = to_xy(PARADAS[i+1]["lat"], PARADAS[i+1]["lon"])
-        dx, dy = x2-x1, y2-y1
-        seg_len = math.sqrt(dx**2 + dy**2)
-        if seg_len == 0: continue
-        t = max(0, min(1, ((px-x1)*dx + (py-y1)*dy) / (seg_len**2)))
-        dist = math.sqrt((px-(x1+t*dx))**2 + (py-(y1+t*dy))**2)
-        if dist < m_dist:
-            m_dist, m_idx = dist, i
-            m_prog = prog_acum + (t*seg_len)
-        prog_acum += seg_len
-    return f"Entre {PARADAS[m_idx]['nome']} e {PARADAS[m_idx+1]['nome']}", m_idx, m_prog
+    return pd.DataFrame(linhas)
+
 
 # ============================================================
-# EXECUÇÃO DO DASHBOARD
+# MAPA
 # ============================================================
 
-# Inicializa Session State
-if "sentido_atual" not in st.session_state: st.session_state.sentido_atual = "Aguardando..."
-if "term_ref" not in st.session_state: st.session_state.term_ref = None
+def criar_mapa(latitude_atual=None, longitude_atual=None):
+    if latitude_atual is not None and longitude_atual is not None:
+        centro_mapa = [latitude_atual, longitude_atual]
+        zoom = 16
+    else:
+        centro_mapa = [-23.6645, -46.6345]
+        zoom = 14
 
-# Obtém dados do MQTT
-est_mqtt = iniciar_conexao_mqtt_v2()
-snap = est_mqtt.snapshot() # Chama o método da classe EstadoMQTT
-payload = snap["payload"]
+    mapa = folium.Map(
+        location=centro_mapa,
+        zoom_start=zoom,
+        tiles="OpenStreetMap"
+    )
 
-# Extração de dados
-lat = converter_float(obter_valor(payload, ["lat", "latitude"]))
-lon = converter_float(obter_valor(payload, ["lon", "longitude"]))
-vel = int(round(converter_float(obter_valor(payload, ["speed", "velocidade"])) or 0))
+    coordenadas_rota = [(p["lat"], p["lon"]) for p in PARADAS]
 
-# Lógica operacional
-if lat and lon:
-    trecho, idx, prog = calcular_progresso(lat, lon)
-    
-    # Sentido simplificado para evitar erros
-    d_diadema = calcular_distancia(lat, lon, PARADAS[0]["lat"], PARADAS[0]["lon"])
-    d_jabaquara = calcular_distancia(lat, lon, PARADAS[-1]["lat"], PARADAS[-1]["lon"])
-    
-    if d_diadema < 20: st.session_state.sentido_atual = "Sentido Jabaquara"
-    if d_jabaquara < 20: st.session_state.sentido_atual = "Sentido Diadema"
-    
-    proxima = PARADAS[idx+1]["nome"] if "Jabaquara" in st.session_state.sentido_atual else PARADAS[idx]["nome"]
+    folium.PolyLine(
+        locations=coordenadas_rota,
+        weight=5,
+        opacity=0.8,
+        popup="Linha 290 - Terminal Diadema / Terminal Jabaquara"
+    ).add_to(mapa)
+
+    for parada in PARADAS:
+        folium.CircleMarker(
+            location=[parada["lat"], parada["lon"]],
+            radius=4,
+            fill=True,
+            fill_opacity=0.9,
+            opacity=0.9,
+            popup=parada["nome"]
+        ).add_to(mapa)
+
+    if latitude_atual is not None and longitude_atual is not None:
+        folium.Marker(
+            location=[latitude_atual, longitude_atual],
+            popup=f"Posição atual do ônibus<br>Lat: {latitude_atual:.6f}<br>Lon: {longitude_atual:.6f}"
+        ).add_to(mapa)
+
+    return mapa
+
+
+# ============================================================
+# INICIALIZAÇÃO DO SESSION STATE
+# ============================================================
+
+if "progresso_rota_anterior" not in st.session_state:
+    st.session_state["progresso_rota_anterior"] = None
+
+if "sentido_atual" not in st.session_state:
+    st.session_state["sentido_atual"] = "Aguardando deslocamento"
+
+if "terminal_referencia" not in st.session_state:
+    st.session_state["terminal_referencia"] = None
+
+
+estado_mqtt = iniciar_mqtt()
+snapshot = estado_mqtt.snapshot()
+payload = snapshot["payload"]
+
+
+# ============================================================
+# LEITURA DO PAYLOAD MQTT
+# ============================================================
+
+latitude = converter_float(
+    obter_valor(payload, ["latitude", "lat"])
+)
+
+longitude = converter_float(
+    obter_valor(payload, ["longitude", "lon", "lng"])
+)
+
+velocidade_float = converter_float(
+    obter_valor(payload, ["velocidade", "speed", "velocidade_kmh"])
+)
+
+heading = obter_heading_payload(payload)
+
+if velocidade_float is not None:
+    velocidade = int(round(velocidade_float))
+    velocidade_card = f"{velocidade} km/h"
 else:
-    trecho = proxima = "Aguardando GPS..."
+    velocidade = 0
+    velocidade_card = "Aguardando dados"
 
-# Interface Visual
-st.markdown("""
+
+data = obter_valor(
+    payload,
+    ["data", "date"],
+    "Aguardando dados"
+)
+
+hora = obter_valor(
+    payload,
+    ["hora", "hora_local", "hora_brasil", "time"],
+    "Aguardando dados"
+)
+
+data, hora = ajustar_data_hora(data, hora)
+
+if data != "Aguardando dados" and hora != "Aguardando dados":
+    data_hora = f"{data} {hora}"
+else:
+    data_hora = "Aguardando dados"
+
+
+embarque_payload = obter_valor(
+    payload,
+    ["embarque", "embarques", "boarding", "entrada", "entradas"],
+    None
+)
+
+desembarque_payload = obter_valor(
+    payload,
+    ["desembarque", "desembarques", "alighting", "saida", "saidas"],
+    None
+)
+
+lotacao_payload = obter_valor(
+    payload,
+    ["lotacao", "lotação", "lotacao_atual", "lotação_atual", "ocupacao", "ocupação"],
+    None
+)
+
+
+# ============================================================
+# CÁLCULOS DO DASHBOARD
+# ============================================================
+
+if latitude is not None and longitude is not None:
+    parada_atual, indice_parada_proxima, distancia_parada = identificar_parada_atual(
+        latitude,
+        longitude
+    )
+
+    trecho, indice_trecho, progresso_rota, distancia_trecho = calcular_progresso_rota(
+        latitude,
+        longitude
+    )
+
+    sentido = identificar_sentido(
+        latitude,
+        longitude,
+        progresso_rota,
+        indice_trecho=indice_trecho,
+        heading=heading,
+        velocidade=velocidade
+    )
+
+    st.session_state["progresso_rota_anterior"] = progresso_rota
+
+    latitude_longitude = f"Lat: {latitude:.6f}\nLon: {longitude:.6f}"
+
+    if parada_atual == "Em rota":
+        indice_tabela = None
+    else:
+        indice_tabela = indice_parada_proxima
+
+else:
+    parada_atual = "Aguardando dados"
+    indice_parada_proxima = None
+    indice_tabela = None
+    trecho = "Aguardando dados"
+    sentido = "Aguardando dados"
+    latitude_longitude = "Aguardando dados"
+
+
+tabela_operacional = criar_tabela_operacional(
+    data_hora=data_hora,
+    indice_atual=indice_tabela,
+    embarque_atual=valor_tabela(embarque_payload),
+    desembarque_atual=valor_tabela(desembarque_payload),
+    lotacao_atual=valor_tabela(lotacao_payload)
+)
+
+
+# ============================================================
+# ESTILO VISUAL
+# ============================================================
+
+st.markdown(
+    """
     <style>
-        .card-next {
-            border: 1px solid rgba(49, 51, 63, 0.2); border-radius: 10px;
-            padding: 15px; background: rgba(255, 255, 255, 0.02); height: 100px;
+        .block-container {
+            padding-top: 1.2rem;
+            padding-bottom: 2rem;
         }
-        .card-title { font-size: 0.8rem; opacity: 0.7; text-transform: uppercase; }
-        .card-val { font-size: 1.2rem; font-weight: bold; margin-top: 5px; }
+
+        .card-next {
+            border: 1px solid rgba(49, 51, 63, 0.16);
+            border-radius: 12px;
+            padding: 10px 13px;
+            height: 104px;
+            max-height: 104px;
+            margin-bottom: 10px;
+            background: rgba(255, 255, 255, 0.02);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+        }
+
+        .card-title-next {
+            font-size: 0.78rem;
+            opacity: 0.75;
+            margin-bottom: 5px;
+            line-height: 1.15;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .card-value-next {
+            font-size: clamp(0.92rem, 1.05vw, 1.18rem);
+            font-weight: 500;
+            line-height: 1.18;
+            word-break: break-word;
+            white-space: normal;
+        }
+
+        div[data-testid="stDataFrame"] {
+            font-size: 0.95rem;
+        }
     </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True
+)
 
-st.title("Painel de Controle Next Mobilidade | Linha 290")
 
-def draw_card(title, val):
-    st.markdown(f"<div class='card-next'><div class='card-title'>{title}</div><div class='card-val'>{val}</div></div>", unsafe_allow_html=True)
+# ============================================================
+# INTERFACE
+# ============================================================
 
-c1, c2, c3 = st.columns(3)
-with c1: draw_card("Sentido", st.session_state.sentido_atual)
-with c2: draw_card("Velocidade", f"{vel} km/h")
-with c3: draw_card("Última Atualização", snap["ultima_mensagem"])
+st.title("Painel de Controle Next Mobilidade")
 
-c4, c5, c6 = st.columns(3)
-with c4: draw_card("Trecho Atual", trecho)
-with c5: draw_card("Próxima Parada", proxima)
-with c6: draw_card("Lotação", obter_valor(payload, ["lotacao"], "---"))
 
-st.subheader("Visualização Geográfica")
-col_map, col_list = st.columns([2, 1])
+# ============================================================
+# CARDS PRINCIPAIS
+# APENAS 6 CARDS, SEM REDUNDÂNCIA
+# ============================================================
 
-with col_map:
-    centro = [lat, lon] if lat else [-23.66, -46.63]
-    m = folium.Map(location=centro, zoom_start=14)
-    folium.PolyLine([(p["lat"], p["lon"]) for p in PARADAS], color="blue", weight=3, opacity=0.5).add_to(m)
-    if lat:
-        folium.Marker([lat, lon], popup="Ônibus", icon=folium.Icon(color="blue", icon="bus", prefix="fa")).add_to(m)
-    st_folium(m, width="100%", height=400, returned_objects=[])
+col1, col2, col3 = st.columns(3)
 
-with col_list:
-    st.dataframe(pd.DataFrame([p["nome"] for p in PARADAS], columns=["Itinerário"]), use_container_width=True, hide_index=True)
+with col1:
+    exibir_card("Parada Atual", parada_atual)
 
-with st.expander("Dados Brutos (Debug)"):
-    st.write(f"Conectado: {snap['conectado']}")
+with col2:
+    exibir_card("Velocidade", velocidade_card)
+
+with col3:
+    exibir_card("Data e Hora", data_hora)
+
+
+col4, col5, col6 = st.columns(3)
+
+with col4:
+    exibir_card("Latitude / Longitude", latitude_longitude)
+
+with col5:
+    exibir_card("Sentido", sentido)
+
+with col6:
+    exibir_card("Trecho", trecho)
+
+
+# ============================================================
+# TABELA OPERACIONAL
+# ============================================================
+
+st.subheader("Tabela operacional da linha")
+
+st.dataframe(
+    tabela_operacional,
+    use_container_width=True,
+    hide_index=True
+)
+
+
+# ============================================================
+# MAPA
+# ============================================================
+
+st.subheader("Mapa da linha 290")
+
+mapa = criar_mapa(latitude, longitude)
+
+st_folium(
+    mapa,
+    width=None,
+    height=520,
+    returned_objects=[]
+)
+
+
+# ============================================================
+# STATUS TÉCNICO MQTT
+# ============================================================
+
+with st.expander("Status técnico MQTT"):
+    st.write("Broker:", MQTT_BROKER)
+    st.write("Porta:", MQTT_PORT)
+    st.write("Tópico:", MQTT_TOPIC)
+    st.write("Conectado:", "Sim" if snapshot["conectado"] else "Não")
+    st.write("Última mensagem recebida:", snapshot["ultima_mensagem"])
+
+    if heading is not None:
+        st.write("Heading / Direção GPS:", f"{heading:.1f}°")
+    else:
+        st.write("Heading / Direção GPS:", "Aguardando dados")
+
+    st.write("Último payload recebido:")
     st.json(payload)
+
+    if snapshot["erro"]:
+        st.error(snapshot["erro"])
+
+
+# ============================================================
+# ATUALIZAÇÃO AUTOMÁTICA
+# ============================================================
 
 time.sleep(INTERVALO_ATUALIZACAO)
 st.rerun()
