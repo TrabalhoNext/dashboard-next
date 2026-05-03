@@ -1,8 +1,9 @@
 import json
 import time
 import math
+import html
 import threading
-from datetime import datetime, time as dt_time, timezone, timedelta
+from datetime import datetime, timezone, timedelta
 
 try:
     from zoneinfo import ZoneInfo
@@ -31,81 +32,30 @@ MQTT_TOPIC = st.secrets["mqtt"]["topico"]
 MQTT_USUARIO = st.secrets["mqtt"]["usuario"]
 MQTT_SENHA = st.secrets["mqtt"]["senha"]
 
-INTERVALO_ATUALIZACAO = 3  # segundos
-RAIO_PARADA_METROS = 30    # metros
+INTERVALO_ATUALIZACAO = 3
+
+RAIO_PARADA_ATUAL_METROS = 15
+RAIO_SAIDA_TERMINAL_METROS = 10
+VELOCIDADE_MINIMA_SENTIDO = 2
 
 
 # ============================================================
 # PARADAS DA LINHA 290
+# FORMATO CORRETO: LATITUDE, LONGITUDE
 # ============================================================
 
 PARADAS = [
-    {
-        "ordem": 1,
-        "nome": "Terminal Diadema",
-        "lat": -23.682681458564325,
-        "lon": -46.62691332328152
-    },
-    {
-        "ordem": 2,
-        "nome": "Parada Assembleia",
-        "lat": -23.67697409771605,
-        "lon": -46.627793033156586
-    },
-    {
-        "ordem": 3,
-        "nome": "Parada Divisa",
-        "lat": -23.673551659194004,
-        "lon": -46.63089933449298
-    },
-    {
-        "ordem": 4,
-        "nome": "Parada Vila Clara",
-        "lat": -23.670446876785558,
-        "lon": -46.63259010672355
-    },
-    {
-        "ordem": 5,
-        "nome": "Parada Bom Clima",
-        "lat": -23.669120531442708,
-        "lon": -46.63486429031358
-    },
-    {
-        "ordem": 6,
-        "nome": "Parada São José",
-        "lat": -23.664882066923965,
-        "lon": -46.63779830145058
-    },
-    {
-        "ordem": 7,
-        "nome": "Parada Americanópolis",
-        "lat": -23.66095067269106,
-        "lon": -46.637240408622645
-    },
-    {
-        "ordem": 8,
-        "nome": "Parada Faccini",
-        "lat": -23.656897096071692,
-        "lon": -46.63611395876546
-    },
-    {
-        "ordem": 9,
-        "nome": "Parada Encontro",
-        "lat": -23.652614165456484,
-        "lon": -46.63710571915031
-    },
-    {
-        "ordem": 10,
-        "nome": "Parada Cidade Vargas",
-        "lat": -23.648791349310596,
-        "lon": -46.64064538509645
-    },
-    {
-        "ordem": 11,
-        "nome": "Terminal Jabaquara",
-        "lat": -23.646183664190886,
-        "lon": -46.639878302287805
-    }
+    {"nome": "Terminal Diadema", "lat": -23.682681458564325, "lon": -46.62691332328152},
+    {"nome": "Parada Assembleia", "lat": -23.67697409771605, "lon": -46.627793033156586},
+    {"nome": "Parada Divisa", "lat": -23.673551659194004, "lon": -46.63089933449298},
+    {"nome": "Parada Vila Clara", "lat": -23.670446876785558, "lon": -46.63259010672355},
+    {"nome": "Parada Bom Clima", "lat": -23.669120531442708, "lon": -46.63486429031358},
+    {"nome": "Parada São José", "lat": -23.664882066923965, "lon": -46.63779830145058},
+    {"nome": "Parada Americanópolis", "lat": -23.66095067269106, "lon": -46.637240408622645},
+    {"nome": "Parada Faccini", "lat": -23.656897096071692, "lon": -46.63611395876546},
+    {"nome": "Parada Encontro", "lat": -23.652614165456484, "lon": -46.63710571915031},
+    {"nome": "Parada Cidade Vargas", "lat": -23.648791349310596, "lon": -46.64064538509645},
+    {"nome": "Terminal Jabaquara", "lat": -23.646183664190886, "lon": -46.639878302287805},
 ]
 
 
@@ -130,6 +80,7 @@ def converter_float(valor):
             valor = (
                 valor.replace("km/h", "")
                 .replace("km", "")
+                .replace("°", "")
                 .replace(",", ".")
                 .strip()
             )
@@ -141,35 +92,41 @@ def converter_float(valor):
 def agora_sao_paulo():
     if ZoneInfo is not None:
         return datetime.now(ZoneInfo("America/Sao_Paulo"))
-
     return datetime.utcnow() - timedelta(hours=3)
 
 
-def converter_data_hora_para_sao_paulo(data_valor, hora_valor):
-    if not hora_valor or hora_valor == "Aguardando dados":
-        return data_valor, hora_valor
+def ajustar_data_hora(data_valor, hora_valor):
+    """
+    Se a hora vier simples, como 19:30:02, o dashboard exibe como recebeu.
+    Se vier ISO/UTC, converte para São Paulo.
+    """
 
-    texto_hora = str(hora_valor).strip()
+    if not data_valor:
+        data_valor = "Aguardando dados"
+
+    if not hora_valor:
+        hora_valor = "Aguardando dados"
 
     try:
-        if "T" in texto_hora:
-            texto_iso = texto_hora.replace("Z", "+00:00")
-            data_hora = datetime.fromisoformat(texto_iso)
+        hora_texto = str(hora_valor).strip()
+
+        if "T" in hora_texto:
+            data_hora = datetime.fromisoformat(hora_texto.replace("Z", "+00:00"))
 
             if data_hora.tzinfo is None:
                 data_hora = data_hora.replace(tzinfo=timezone.utc)
 
             if ZoneInfo is not None:
-                data_hora_sp = data_hora.astimezone(ZoneInfo("America/Sao_Paulo"))
+                data_hora = data_hora.astimezone(ZoneInfo("America/Sao_Paulo"))
             else:
-                data_hora_sp = data_hora.astimezone(timezone(timedelta(hours=-3)))
+                data_hora = data_hora.astimezone(timezone(timedelta(hours=-3)))
 
-            return data_hora_sp.strftime("%d/%m/%Y"), data_hora_sp.strftime("%H:%M:%S")
+            return data_hora.strftime("%d/%m/%Y"), data_hora.strftime("%H:%M:%S")
 
-        return data_valor, hora_valor
+        return str(data_valor), str(hora_valor)
 
     except Exception:
-        return data_valor, hora_valor
+        return str(data_valor), str(hora_valor)
 
 
 def calcular_distancia_metros(lat1, lon1, lat2, lon2):
@@ -212,72 +169,262 @@ def encontrar_parada_mais_proxima(latitude, longitude):
     return parada_mais_proxima, indice_mais_proximo, menor_distancia
 
 
-def identificar_sentido(indice_atual, ultimo_indice):
-    if ultimo_indice is None:
-        return "Aguardando deslocamento"
+def converter_para_xy_metros(lat, lon, lat_ref, lon_ref):
+    raio_terra = 6371000
 
-    if indice_atual > ultimo_indice:
-        return "Terminal Diadema → Terminal Jabaquara"
+    x = math.radians(lon - lon_ref) * raio_terra * math.cos(math.radians(lat_ref))
+    y = math.radians(lat - lat_ref) * raio_terra
 
-    if indice_atual < ultimo_indice:
-        return "Terminal Jabaquara → Terminal Diadema"
-
-    return "Sem alteração"
+    return x, y
 
 
-def identificar_trecho(indice_atual, sentido):
-    if sentido == "Terminal Diadema → Terminal Jabaquara":
-        if indice_atual < len(PARADAS) - 1:
-            origem = PARADAS[indice_atual]["nome"]
-            destino = PARADAS[indice_atual + 1]["nome"]
-            return f"Entre {origem} e {destino}"
+def calcular_progresso_rota(latitude, longitude):
+    """
+    Calcula em qual trecho da rota o ônibus está, usando projeção do ponto GPS
+    sobre os segmentos entre as paradas.
+    """
 
-        return "Fim da linha - Terminal Jabaquara"
+    lat_ref = PARADAS[0]["lat"]
+    lon_ref = PARADAS[0]["lon"]
 
-    if sentido == "Terminal Jabaquara → Terminal Diadema":
-        if indice_atual > 0:
-            origem = PARADAS[indice_atual]["nome"]
-            destino = PARADAS[indice_atual - 1]["nome"]
-            return f"Entre {origem} e {destino}"
+    px, py = converter_para_xy_metros(latitude, longitude, lat_ref, lon_ref)
 
-        return "Fim da linha - Terminal Diadema"
+    melhor_distancia = float("inf")
+    melhor_indice = 0
+    melhor_progresso = 0
 
-    return "Aguardando deslocamento"
+    progresso_acumulado = 0
+
+    for i in range(len(PARADAS) - 1):
+        p1 = PARADAS[i]
+        p2 = PARADAS[i + 1]
+
+        x1, y1 = converter_para_xy_metros(p1["lat"], p1["lon"], lat_ref, lon_ref)
+        x2, y2 = converter_para_xy_metros(p2["lat"], p2["lon"], lat_ref, lon_ref)
+
+        dx = x2 - x1
+        dy = y2 - y1
+
+        comprimento_segmento = math.sqrt(dx ** 2 + dy ** 2)
+
+        if comprimento_segmento == 0:
+            continue
+
+        t = ((px - x1) * dx + (py - y1) * dy) / (comprimento_segmento ** 2)
+        t = max(0, min(1, t))
+
+        proj_x = x1 + t * dx
+        proj_y = y1 + t * dy
+
+        distancia_segmento = math.sqrt((px - proj_x) ** 2 + (py - proj_y) ** 2)
+        progresso_ponto = progresso_acumulado + (t * comprimento_segmento)
+
+        if distancia_segmento < melhor_distancia:
+            melhor_distancia = distancia_segmento
+            melhor_indice = i
+            melhor_progresso = progresso_ponto
+
+        progresso_acumulado += comprimento_segmento
+
+    origem = PARADAS[melhor_indice]["nome"]
+    destino = PARADAS[melhor_indice + 1]["nome"]
+
+    trecho = f"Entre {origem} e {destino}"
+
+    return trecho, melhor_indice, melhor_progresso, melhor_distancia
 
 
-def interpretar_posicao(latitude, longitude, velocidade):
-    parada, indice_atual, distancia = encontrar_parada_mais_proxima(
-        latitude,
-        longitude
+def identificar_parada_atual(latitude, longitude):
+    parada, indice, distancia = encontrar_parada_mais_proxima(latitude, longitude)
+
+    if distancia <= RAIO_PARADA_ATUAL_METROS:
+        return parada["nome"], indice, distancia
+
+    return "Em rota", indice, distancia
+
+
+def normalizar_angulo(graus):
+    if graus is None:
+        return None
+    return graus % 360
+
+
+def diferenca_angular(angulo1, angulo2):
+    """
+    Calcula a menor diferença entre dois ângulos.
+    Exemplo: 350° e 10° = 20°, não 340°.
+    """
+    return abs((angulo1 - angulo2 + 180) % 360 - 180)
+
+
+def calcular_bearing(lat1, lon1, lat2, lon2):
+    """
+    Calcula a direção em graus entre dois pontos geográficos.
+    0° = Norte
+    90° = Leste
+    180° = Sul
+    270° = Oeste
+    """
+
+    lat1_rad = math.radians(lat1)
+    lat2_rad = math.radians(lat2)
+
+    delta_lon = math.radians(lon2 - lon1)
+
+    x = math.sin(delta_lon) * math.cos(lat2_rad)
+
+    y = (
+        math.cos(lat1_rad) * math.sin(lat2_rad)
+        - math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(delta_lon)
     )
 
-    ultimo_indice = st.session_state.get("ultimo_indice_parada", None)
+    bearing = math.degrees(math.atan2(x, y))
 
-    sentido = identificar_sentido(indice_atual, ultimo_indice)
-    trecho = identificar_trecho(indice_atual, sentido)
+    return normalizar_angulo(bearing)
 
-    st.session_state["ultimo_indice_parada"] = indice_atual
 
-    if velocidade <= 5 and distancia <= RAIO_PARADA_METROS:
-        parada_atual = parada["nome"]
-        situacao = "Parado"
+def obter_heading_payload(payload):
+    """
+    Tenta ler a direção do GPS caso o Raspberry envie esse dado.
+    Aceita vários nomes possíveis no payload MQTT.
+    """
 
-    elif velocidade > 5:
-        parada_atual = "Em rota"
-        situacao = "Em rota"
+    heading = converter_float(
+        obter_valor(
+            payload,
+            [
+                "heading",
+                "course",
+                "bearing",
+                "direcao",
+                "direção",
+                "rumo",
+                "azimute",
+                "gps_heading",
+                "gps_course"
+            ]
+        )
+    )
 
-    else:
-        parada_atual = "Fora de parada cadastrada"
-        situacao = "Parado fora da parada"
+    if heading is None:
+        return None
 
-    return {
-        "parada_atual": parada_atual,
-        "situacao": situacao,
-        "sentido": sentido,
-        "trecho": trecho,
-        "indice_atual": indice_atual,
-        "distancia_parada_m": round(distancia, 1)
-    }
+    return normalizar_angulo(heading)
+
+
+def identificar_sentido(
+    latitude,
+    longitude,
+    progresso_atual,
+    indice_trecho=None,
+    heading=None,
+    velocidade=None
+):
+    """
+    Lógica inteligente para identificar o sentido do ônibus.
+
+    Prioridade:
+    1. Se estiver dentro de 10 m de um terminal, aguarda saída.
+    2. Se saiu mais de 10 m do Terminal Diadema, declara sentido Jabaquara.
+    3. Se saiu mais de 10 m do Terminal Jabaquara, declara sentido Diadema.
+    4. Se o payload MQTT tiver heading/course/rumo, usa a direção real do GPS.
+    5. Se não tiver heading, usa a variação do progresso na rota.
+    """
+
+    terminal_diadema = PARADAS[0]
+    terminal_jabaquara = PARADAS[-1]
+
+    if velocidade is None:
+        velocidade = 0
+
+    distancia_diadema = calcular_distancia_metros(
+        latitude,
+        longitude,
+        terminal_diadema["lat"],
+        terminal_diadema["lon"]
+    )
+
+    distancia_jabaquara = calcular_distancia_metros(
+        latitude,
+        longitude,
+        terminal_jabaquara["lat"],
+        terminal_jabaquara["lon"]
+    )
+
+    # Dentro do raio de saída do Terminal Diadema
+    if distancia_diadema <= RAIO_SAIDA_TERMINAL_METROS:
+        st.session_state["terminal_referencia"] = "diadema"
+        st.session_state["sentido_atual"] = "Aguardando saída do Terminal Diadema"
+        return st.session_state["sentido_atual"]
+
+    # Dentro do raio de saída do Terminal Jabaquara
+    if distancia_jabaquara <= RAIO_SAIDA_TERMINAL_METROS:
+        st.session_state["terminal_referencia"] = "jabaquara"
+        st.session_state["sentido_atual"] = "Aguardando saída do Terminal Jabaquara"
+        return st.session_state["sentido_atual"]
+
+    # Regra de saída dos terminais
+    terminal_referencia = st.session_state.get("terminal_referencia")
+
+    if terminal_referencia == "diadema" and distancia_diadema > RAIO_SAIDA_TERMINAL_METROS:
+        st.session_state["sentido_atual"] = "Sentido Terminal Jabaquara"
+
+    elif terminal_referencia == "jabaquara" and distancia_jabaquara > RAIO_SAIDA_TERMINAL_METROS:
+        st.session_state["sentido_atual"] = "Sentido Terminal Diadema"
+
+    # Uso do heading/course/rumo do GPS, se existir no payload MQTT
+    if (
+        heading is not None
+        and indice_trecho is not None
+        and 0 <= indice_trecho < len(PARADAS) - 1
+        and velocidade >= VELOCIDADE_MINIMA_SENTIDO
+    ):
+        parada_origem = PARADAS[indice_trecho]
+        parada_destino = PARADAS[indice_trecho + 1]
+
+        bearing_sentido_jabaquara = calcular_bearing(
+            parada_origem["lat"],
+            parada_origem["lon"],
+            parada_destino["lat"],
+            parada_destino["lon"]
+        )
+
+        bearing_sentido_diadema = normalizar_angulo(
+            bearing_sentido_jabaquara + 180
+        )
+
+        diferenca_jabaquara = diferenca_angular(
+            heading,
+            bearing_sentido_jabaquara
+        )
+
+        diferenca_diadema = diferenca_angular(
+            heading,
+            bearing_sentido_diadema
+        )
+
+        # Usa o heading somente se estiver coerente com a rota
+        if min(diferenca_jabaquara, diferenca_diadema) <= 75:
+            if diferenca_jabaquara <= diferenca_diadema:
+                st.session_state["sentido_atual"] = "Sentido Terminal Jabaquara"
+            else:
+                st.session_state["sentido_atual"] = "Sentido Terminal Diadema"
+
+            return st.session_state["sentido_atual"]
+
+    # Caso não exista heading, usa o avanço ou recuo na rota
+    progresso_anterior = st.session_state.get("progresso_rota_anterior")
+
+    if progresso_anterior is not None and velocidade >= VELOCIDADE_MINIMA_SENTIDO:
+        diferenca_progresso = progresso_atual - progresso_anterior
+
+        if diferenca_progresso > RAIO_SAIDA_TERMINAL_METROS:
+            st.session_state["sentido_atual"] = "Sentido Terminal Jabaquara"
+
+        elif diferenca_progresso < -RAIO_SAIDA_TERMINAL_METROS:
+            st.session_state["sentido_atual"] = "Sentido Terminal Diadema"
+
+    return st.session_state.get("sentido_atual", "Aguardando deslocamento")
 
 
 def codigo_reason_code(reason_code):
@@ -288,6 +435,21 @@ def codigo_reason_code(reason_code):
         if "success" in texto or texto == "0":
             return 0
         return -1
+
+
+def exibir_card(titulo, valor):
+    titulo = html.escape(str(titulo))
+    valor = html.escape(str(valor)).replace("\n", "<br>")
+
+    st.markdown(
+        f"""
+        <div class="card-next">
+            <div class="card-title-next">{titulo}</div>
+            <div class="card-value-next">{valor}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 
 # ============================================================
@@ -365,53 +527,35 @@ def iniciar_mqtt():
     client.on_disconnect = estado.on_disconnect
     client.on_message = estado.on_message
 
-    client.connect_async(MQTT_BROKER, MQTT_PORT, 60)
+    # Keepalive alterado para 30 segundos
+    client.connect_async(MQTT_BROKER, MQTT_PORT, 30)
     client.loop_start()
 
     return estado
 
 
 # ============================================================
-# TABELA FIXA
+# TABELA OPERACIONAL
 # ============================================================
 
-def criar_tabela_fixa():
-    tabela = []
+def criar_tabela_operacional(data_hora, indice_atual):
+    linhas = []
 
-    for parada in PARADAS:
-        tabela.append({
-            "Ordem": parada["ordem"],
+    for indice, parada in enumerate(PARADAS):
+        if indice == indice_atual:
+            data_hora_linha = data_hora
+        else:
+            data_hora_linha = ""
+
+        linhas.append({
+            "Data e Hora": data_hora_linha,
             "Terminal / Parada": parada["nome"],
-            "Situação": "",
-            "Horário": "",
-            "Velocidade": "",
-            "Sentido": "",
-            "Trecho": ""
+            "Embarque": "Aguardando dados",
+            "Desembarque": "Aguardando dados",
+            "Lotação Atual": "Aguardando dados"
         })
 
-    return pd.DataFrame(tabela)
-
-
-def atualizar_tabela_fixa(df, indice_atual, dados_atualizados):
-    colunas_dinamicas = [
-        "Situação",
-        "Horário",
-        "Velocidade",
-        "Sentido",
-        "Trecho"
-    ]
-
-    for coluna in colunas_dinamicas:
-        df[coluna] = ""
-
-    if indice_atual is not None and 0 <= indice_atual < len(df):
-        df.loc[indice_atual, "Situação"] = dados_atualizados["situacao"]
-        df.loc[indice_atual, "Horário"] = dados_atualizados["hora"]
-        df.loc[indice_atual, "Velocidade"] = f'{dados_atualizados["velocidade"]} km/h'
-        df.loc[indice_atual, "Sentido"] = dados_atualizados["sentido"]
-        df.loc[indice_atual, "Trecho"] = dados_atualizados["trecho"]
-
-    return df
+    return pd.DataFrame(linhas)
 
 
 # ============================================================
@@ -421,7 +565,7 @@ def atualizar_tabela_fixa(df, indice_atual, dados_atualizados):
 def criar_mapa(latitude_atual=None, longitude_atual=None):
     if latitude_atual is not None and longitude_atual is not None:
         centro_mapa = [latitude_atual, longitude_atual]
-        zoom = 15
+        zoom = 16
     else:
         centro_mapa = [-23.6645, -46.6345]
         zoom = 14
@@ -437,7 +581,8 @@ def criar_mapa(latitude_atual=None, longitude_atual=None):
     folium.PolyLine(
         locations=coordenadas_rota,
         weight=5,
-        opacity=0.8
+        opacity=0.8,
+        popup="Linha 290 - Terminal Diadema / Terminal Jabaquara"
     ).add_to(mapa)
 
     for parada in PARADAS:
@@ -446,27 +591,31 @@ def criar_mapa(latitude_atual=None, longitude_atual=None):
             radius=4,
             fill=True,
             fill_opacity=0.9,
-            opacity=0.9
+            opacity=0.9,
+            popup=parada["nome"]
         ).add_to(mapa)
 
     if latitude_atual is not None and longitude_atual is not None:
         folium.Marker(
             location=[latitude_atual, longitude_atual],
-            popup="Ônibus"
+            popup=f"Posição atual do ônibus<br>Lat: {latitude_atual:.6f}<br>Lon: {longitude_atual:.6f}"
         ).add_to(mapa)
 
     return mapa
 
 
 # ============================================================
-# INICIALIZAÇÃO
+# INICIALIZAÇÃO DO SESSION STATE
 # ============================================================
 
-if "tabela_linha" not in st.session_state:
-    st.session_state["tabela_linha"] = criar_tabela_fixa()
+if "progresso_rota_anterior" not in st.session_state:
+    st.session_state["progresso_rota_anterior"] = None
 
-if "ultimo_indice_parada" not in st.session_state:
-    st.session_state["ultimo_indice_parada"] = None
+if "sentido_atual" not in st.session_state:
+    st.session_state["sentido_atual"] = "Aguardando deslocamento"
+
+if "terminal_referencia" not in st.session_state:
+    st.session_state["terminal_referencia"] = None
 
 
 estado_mqtt = iniciar_mqtt()
@@ -475,7 +624,7 @@ payload = snapshot["payload"]
 
 
 # ============================================================
-# LEITURA DO ÚLTIMO PAYLOAD RECEBIDO
+# LEITURA DO PAYLOAD MQTT
 # ============================================================
 
 latitude = converter_float(
@@ -487,13 +636,17 @@ longitude = converter_float(
 )
 
 velocidade_float = converter_float(
-    obter_valor(payload, ["velocidade", "speed"], 0)
+    obter_valor(payload, ["velocidade", "speed", "velocidade_kmh"])
 )
+
+heading = obter_heading_payload(payload)
 
 if velocidade_float is not None:
     velocidade = int(round(velocidade_float))
+    velocidade_card = f"{velocidade} km/h"
 else:
     velocidade = 0
+    velocidade_card = "Aguardando dados"
 
 
 data = obter_valor(
@@ -504,62 +657,103 @@ data = obter_valor(
 
 hora = obter_valor(
     payload,
-    ["hora_local", "hora_brasil", "hora", "time"],
+    ["hora", "hora_local", "hora_brasil", "time"],
     "Aguardando dados"
 )
 
-data, hora = converter_data_hora_para_sao_paulo(data, hora)
+data, hora = ajustar_data_hora(data, hora)
 
-embarque = obter_valor(
-    payload,
-    ["embarque", "embarques"],
-    "Aguardando dados"
-)
+if data != "Aguardando dados" and hora != "Aguardando dados":
+    data_hora = f"{data} {hora}"
+else:
+    data_hora = "Aguardando dados"
 
-desembarque = obter_valor(
-    payload,
-    ["desembarque", "desembarques"],
-    "Aguardando dados"
-)
 
-lotacao = obter_valor(
-    payload,
-    ["lotacao", "lotação", "lotacao_atual", "lotação_atual"],
-    "Aguardando dados"
-)
-
+# ============================================================
+# CÁLCULOS DO DASHBOARD
+# ============================================================
 
 if latitude is not None and longitude is not None:
-    interpretacao = interpretar_posicao(latitude, longitude, velocidade)
+    parada_atual, indice_parada_proxima, distancia_parada = identificar_parada_atual(
+        latitude,
+        longitude
+    )
 
-    parada_atual = interpretacao["parada_atual"]
-    situacao = interpretacao["situacao"]
-    sentido = interpretacao["sentido"]
-    trecho = interpretacao["trecho"]
-    indice_atual = interpretacao["indice_atual"]
-    distancia_parada_m = interpretacao["distancia_parada_m"]
+    trecho, indice_trecho, progresso_rota, distancia_trecho = calcular_progresso_rota(
+        latitude,
+        longitude
+    )
+
+    sentido = identificar_sentido(
+        latitude,
+        longitude,
+        progresso_rota,
+        indice_trecho=indice_trecho,
+        heading=heading,
+        velocidade=velocidade
+    )
+
+    st.session_state["progresso_rota_anterior"] = progresso_rota
+
+    latitude_longitude = f"Lat: {latitude:.6f}\nLon: {longitude:.6f}"
+    distancia_parada_card = f"{distancia_parada:.1f} m"
 
 else:
     parada_atual = "Aguardando dados"
-    situacao = "Aguardando dados"
-    sentido = "Aguardando dados"
+    indice_parada_proxima = None
+    distancia_parada_card = "Aguardando dados"
     trecho = "Aguardando dados"
-    indice_atual = None
-    distancia_parada_m = "Aguardando dados"
+    sentido = "Aguardando dados"
+    latitude_longitude = "Aguardando dados"
 
 
-dados_atualizados = {
-    "situacao": situacao,
-    "hora": hora,
-    "velocidade": velocidade,
-    "sentido": sentido,
-    "trecho": trecho
-}
+embarque = "Aguardando dados"
+desembarque = "Aguardando dados"
+lotacao = "Aguardando dados"
 
-st.session_state["tabela_linha"] = atualizar_tabela_fixa(
-    st.session_state["tabela_linha"],
-    indice_atual,
-    dados_atualizados
+tabela_operacional = criar_tabela_operacional(
+    data_hora,
+    indice_parada_proxima
+)
+
+
+# ============================================================
+# ESTILO VISUAL
+# ============================================================
+
+st.markdown(
+    """
+    <style>
+        .block-container {
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+        }
+
+        .card-next {
+            border: 1px solid rgba(49, 51, 63, 0.15);
+            border-radius: 14px;
+            padding: 18px 18px;
+            min-height: 125px;
+            margin-bottom: 16px;
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .card-title-next {
+            font-size: 0.95rem;
+            opacity: 0.75;
+            margin-bottom: 8px;
+        }
+
+        .card-value-next {
+            font-size: 1.70rem;
+            font-weight: 500;
+            line-height: 1.25;
+            word-break: break-word;
+            white-space: normal;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
 )
 
 
@@ -577,84 +771,51 @@ st.title("Painel de Controle Next Mobilidade")
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.metric("Parada atual", parada_atual)
+    exibir_card("Parada Atual", parada_atual)
 
 with col2:
-    st.metric("Situação", situacao)
+    exibir_card("Velocidade", velocidade_card)
 
 with col3:
-    if latitude is not None and longitude is not None:
-        st.metric("Velocidade", f"{velocidade} km/h")
-    else:
-        st.metric("Velocidade", "Aguardando dados")
+    exibir_card("Data e Hora", data_hora)
 
 with col4:
-    st.metric("Última atualização", snapshot["ultima_mensagem"])
+    exibir_card("Latitude / Longitude", latitude_longitude)
 
 
 col5, col6, col7 = st.columns(3)
 
 with col5:
-    st.metric("Sentido", sentido)
+    exibir_card("Sentido", sentido)
 
 with col6:
-    st.metric("Trecho", trecho)
+    exibir_card("Trecho", trecho)
 
 with col7:
-    if isinstance(distancia_parada_m, (int, float)):
-        st.metric("Distância da parada", f"{distancia_parada_m} m")
-    else:
-        st.metric("Distância da parada", distancia_parada_m)
+    exibir_card("Distância da parada", distancia_parada_card)
 
 
 col8, col9, col10 = st.columns(3)
 
 with col8:
-    st.metric("Embarque", embarque)
+    exibir_card("Embarque", embarque)
 
 with col9:
-    st.metric("Desembarque", desembarque)
+    exibir_card("Desembarque", desembarque)
 
 with col10:
-    st.metric("Lotação atual", lotacao)
+    exibir_card("Lotação atual", lotacao)
 
 
 # ============================================================
-# DADOS GPS
-# ============================================================
-
-st.subheader("Dados atuais do GPS")
-
-col11, col12, col13, col14 = st.columns(4)
-
-with col11:
-    st.metric("Data", data)
-
-with col12:
-    st.metric("Hora", hora)
-
-with col13:
-    if latitude is not None:
-        st.metric("Latitude", latitude)
-    else:
-        st.metric("Latitude", "Aguardando dados")
-
-with col14:
-    if longitude is not None:
-        st.metric("Longitude", longitude)
-    else:
-        st.metric("Longitude", "Aguardando dados")
-
-
-# ============================================================
-# TABELA FIXA
+# TABELA OPERACIONAL
 # ============================================================
 
 st.subheader("Tabela operacional da linha")
 
 st.dataframe(
-    st.session_state["tabela_linha"],
-    width="stretch",
+    tabela_operacional,
+    use_container_width=True,
     hide_index=True
 )
 
@@ -670,13 +831,13 @@ mapa = criar_mapa(latitude, longitude)
 st_folium(
     mapa,
     width=None,
-    height=500,
+    height=520,
     returned_objects=[]
 )
 
 
 # ============================================================
-# STATUS MQTT
+# STATUS TÉCNICO MQTT
 # ============================================================
 
 with st.expander("Status técnico MQTT"):
@@ -685,6 +846,12 @@ with st.expander("Status técnico MQTT"):
     st.write("Tópico:", MQTT_TOPIC)
     st.write("Conectado:", "Sim" if snapshot["conectado"] else "Não")
     st.write("Última mensagem recebida:", snapshot["ultima_mensagem"])
+
+    if heading is not None:
+        st.write("Heading / Direção GPS:", f"{heading:.1f}°")
+    else:
+        st.write("Heading / Direção GPS:", "Aguardando dados")
+
     st.write("Último payload recebido:")
     st.json(payload)
 
@@ -698,3 +865,4 @@ with st.expander("Status técnico MQTT"):
 
 time.sleep(INTERVALO_ATUALIZACAO)
 st.rerun()
+   
