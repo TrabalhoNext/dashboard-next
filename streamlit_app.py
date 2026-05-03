@@ -2,7 +2,12 @@ import json
 import time
 import math
 import threading
-from datetime import datetime
+from datetime import datetime, time as dt_time, timezone, timedelta
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 
 import pandas as pd
 import streamlit as st
@@ -16,7 +21,7 @@ from streamlit_folium import st_folium
 # ============================================================
 
 st.set_page_config(
-    page_title="Dashboard Linha 290",
+    page_title="Painel de Controle Next Mobilidade",
     layout="wide"
 )
 
@@ -24,7 +29,7 @@ MQTT_BROKER = "broker.hivemq.com"
 MQTT_PORT = 1883
 MQTT_TOPIC = "next/linha290/gps"
 
-INTERVALO_ATUALIZACAO = 5  # segundos
+INTERVALO_ATUALIZACAO = 3  # segundos
 
 
 # ============================================================
@@ -102,13 +107,93 @@ PARADAS = [
 
 
 # ============================================================
-# FUNÇÕES DE CÁLCULO
+# FUNÇÕES AUXILIARES
 # ============================================================
 
+def obter_valor(dados, chaves, padrao=None):
+    for chave in chaves:
+        valor = dados.get(chave)
+        if valor is not None and valor != "":
+            return valor
+    return padrao
+
+
+def converter_float(valor):
+    if valor is None or valor == "" or valor == "Aguardando dados":
+        return None
+
+    try:
+        if isinstance(valor, str):
+            valor = (
+                valor.replace("km/h", "")
+                .replace("km", "")
+                .replace(",", ".")
+                .strip()
+            )
+        return float(valor)
+    except Exception:
+        return None
+
+
+def agora_sao_paulo():
+    if ZoneInfo is not None:
+        return datetime.now(ZoneInfo("America/Sao_Paulo"))
+
+    return datetime.utcnow() - timedelta(hours=3)
+
+
+def converter_data_hora_para_sao_paulo(data_valor, hora_valor):
+    """
+    Corrige a hora para o fuso de São Paulo.
+
+    Quando o payload recebe hora em UTC, por exemplo 20:37:29,
+    o dashboard converte para 17:37:29 no horário de São Paulo.
+    """
+
+    if not hora_valor or hora_valor == "Aguardando dados":
+        return data_valor, hora_valor
+
+    texto_hora = str(hora_valor).strip()
+
+    try:
+        if "T" in texto_hora:
+            texto_iso = texto_hora.replace("Z", "+00:00")
+            data_hora = datetime.fromisoformat(texto_iso)
+
+            if data_hora.tzinfo is None:
+                data_hora = data_hora.replace(tzinfo=timezone.utc)
+
+        else:
+            if data_valor and data_valor != "Aguardando dados":
+                try:
+                    data_base = datetime.strptime(str(data_valor), "%d/%m/%Y").date()
+                except Exception:
+                    data_base = agora_sao_paulo().date()
+            else:
+                data_base = agora_sao_paulo().date()
+
+            partes = texto_hora.split(":")
+            hora = int(partes[0])
+            minuto = int(partes[1]) if len(partes) > 1 else 0
+            segundo = int(float(partes[2])) if len(partes) > 2 else 0
+
+            data_hora = datetime.combine(
+                data_base,
+                dt_time(hora, minuto, segundo)
+            ).replace(tzinfo=timezone.utc)
+
+        if ZoneInfo is not None:
+            data_hora_sp = data_hora.astimezone(ZoneInfo("America/Sao_Paulo"))
+        else:
+            data_hora_sp = data_hora.astimezone(timezone(timedelta(hours=-3)))
+
+        return data_hora_sp.strftime("%d/%m/%Y"), data_hora_sp.strftime("%H:%M:%S")
+
+    except Exception:
+        return data_valor, hora_valor
+
+
 def calcular_distancia_metros(lat1, lon1, lat2, lon2):
-    """
-    Calcula distância aproximada entre dois pontos GPS em metros.
-    """
     raio_terra = 6371000
 
     phi1 = math.radians(lat1)
@@ -149,9 +234,6 @@ def encontrar_parada_mais_proxima(latitude, longitude):
 
 
 def identificar_sentido(indice_atual, ultimo_indice):
-    """
-    Identifica o sentido pela variação da posição entre as paradas.
-    """
     if ultimo_indice is None:
         return "Aguardando deslocamento"
 
@@ -165,14 +247,12 @@ def identificar_sentido(indice_atual, ultimo_indice):
 
 
 def identificar_trecho(indice_atual, sentido):
-    """
-    Define o trecho com base no índice da parada mais próxima e no sentido.
-    """
     if sentido == "Terminal Diadema → Terminal Jabaquara":
         if indice_atual < len(PARADAS) - 1:
             origem = PARADAS[indice_atual]["nome"]
             destino = PARADAS[indice_atual + 1]["nome"]
             return f"Entre {origem} e {destino}"
+
         return "Fim da linha - Terminal Jabaquara"
 
     if sentido == "Terminal Jabaquara → Terminal Diadema":
@@ -180,16 +260,17 @@ def identificar_trecho(indice_atual, sentido):
             origem = PARADAS[indice_atual]["nome"]
             destino = PARADAS[indice_atual - 1]["nome"]
             return f"Entre {origem} e {destino}"
+
         return "Fim da linha - Terminal Diadema"
 
     return "Aguardando deslocamento"
 
 
 def interpretar_posicao(latitude, longitude, velocidade):
-    """
-    Interpreta a posição do ônibus com base no GPS.
-    """
-    parada, indice_atual, distancia = encontrar_parada_mais_proxima(latitude, longitude)
+    parada, indice_atual, distancia = encontrar_parada_mais_proxima(
+        latitude,
+        longitude
+    )
 
     ultimo_indice = st.session_state.get("ultimo_indice_parada", None)
 
@@ -198,17 +279,16 @@ def interpretar_posicao(latitude, longitude, velocidade):
 
     st.session_state["ultimo_indice_parada"] = indice_atual
 
-    # Ajuste de tolerância da parada
-    # Se quiser mais rígido, use 30 ou 40 metros.
-    # Se quiser mais flexível em teste real, use 80 ou 100 metros.
-    RAIO_PARADA_METROS = 80
+    RAIO_PARADA_METROS = 30
 
     if velocidade <= 5 and distancia <= RAIO_PARADA_METROS:
         parada_atual = parada["nome"]
         situacao = "Parado"
+
     elif velocidade > 5:
         parada_atual = "Em rota"
         situacao = "Em rota"
+
     else:
         parada_atual = "Fora de parada cadastrada"
         situacao = "Parado fora da parada"
@@ -227,36 +307,70 @@ def interpretar_posicao(latitude, longitude, velocidade):
 # MQTT
 # ============================================================
 
-def on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        client.subscribe(MQTT_TOPIC)
+class EstadoMQTT:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.payload = {}
+        self.ultima_mensagem = "Aguardando dados"
+        self.erro = ""
+        self.conectado = False
+
+    def on_connect(self, client, userdata, flags, rc):
+        with self.lock:
+            self.conectado = rc == 0
+
+            if rc == 0:
+                self.erro = ""
+            else:
+                self.erro = f"Falha de conexão MQTT. Código: {rc}"
+
+        if rc == 0:
+            client.subscribe(MQTT_TOPIC)
+
+    def on_disconnect(self, client, userdata, rc):
+        with self.lock:
+            self.conectado = False
+
+            if rc != 0:
+                self.erro = f"MQTT desconectado inesperadamente. Código: {rc}"
+
+    def on_message(self, client, userdata, msg):
+        try:
+            texto = msg.payload.decode("utf-8")
+            dados = json.loads(texto)
+
+            with self.lock:
+                self.payload = dados
+                self.ultima_mensagem = agora_sao_paulo().strftime("%d/%m/%Y %H:%M:%S")
+                self.erro = ""
+
+        except Exception as erro:
+            with self.lock:
+                self.erro = f"Erro ao ler payload MQTT: {erro}"
+
+    def snapshot(self):
+        with self.lock:
+            return {
+                "payload": dict(self.payload),
+                "ultima_mensagem": self.ultima_mensagem,
+                "erro": self.erro,
+                "conectado": self.conectado
+            }
 
 
-def on_message(client, userdata, msg):
-    try:
-        payload = msg.payload.decode("utf-8")
-        dados = json.loads(payload)
-
-        st.session_state["ultimo_payload_mqtt"] = dados
-        st.session_state["ultima_mensagem_recebida"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-
-    except Exception as erro:
-        st.session_state["erro_mqtt"] = str(erro)
-
-
+@st.cache_resource
 def iniciar_mqtt():
-    if "mqtt_iniciado" not in st.session_state:
-        st.session_state["mqtt_iniciado"] = True
+    estado = EstadoMQTT()
 
-        client = mqtt.Client()
-        client.on_connect = on_connect
-        client.on_message = on_message
+    client = mqtt.Client()
+    client.on_connect = estado.on_connect
+    client.on_disconnect = estado.on_disconnect
+    client.on_message = estado.on_message
 
-        client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    client.connect_async(MQTT_BROKER, MQTT_PORT, 60)
+    client.loop_start()
 
-        thread = threading.Thread(target=client.loop_forever)
-        thread.daemon = True
-        thread.start()
+    return estado
 
 
 # ============================================================
@@ -281,11 +395,6 @@ def criar_tabela_fixa():
 
 
 def atualizar_tabela_fixa(df, indice_atual, dados_atualizados):
-    """
-    Atualiza a tabela fixa sem criar novas linhas.
-    Apenas limpa os campos dinâmicos e preenche a linha atual.
-    """
-
     colunas_dinamicas = [
         "Situação",
         "Horário",
@@ -312,11 +421,16 @@ def atualizar_tabela_fixa(df, indice_atual, dados_atualizados):
 # ============================================================
 
 def criar_mapa(latitude_atual=None, longitude_atual=None):
-    centro_mapa = [-23.6645, -46.6345]
+    if latitude_atual is not None and longitude_atual is not None:
+        centro_mapa = [latitude_atual, longitude_atual]
+        zoom = 15
+    else:
+        centro_mapa = [-23.6645, -46.6345]
+        zoom = 14
 
     mapa = folium.Map(
         location=centro_mapa,
-        zoom_start=14,
+        zoom_start=zoom,
         tiles="OpenStreetMap"
     )
 
@@ -325,45 +439,30 @@ def criar_mapa(latitude_atual=None, longitude_atual=None):
     folium.PolyLine(
         locations=coordenadas_rota,
         weight=5,
-        opacity=0.8,
-        tooltip="Rota Linha 290"
+        opacity=0.8
     ).add_to(mapa)
 
-    # Marcadores discretos das paradas
     for parada in PARADAS:
         folium.CircleMarker(
             location=[parada["lat"], parada["lon"]],
             radius=4,
-            popup=parada["nome"],
-            tooltip=parada["nome"],
-            fill=True
+            fill=True,
+            fill_opacity=0.9,
+            opacity=0.9
         ).add_to(mapa)
 
-    # Marcador do ônibus
     if latitude_atual is not None and longitude_atual is not None:
         folium.Marker(
             location=[latitude_atual, longitude_atual],
-            popup="Posição atual do ônibus",
-            tooltip="Ônibus"
+            popup="Ônibus"
         ).add_to(mapa)
-
-        mapa.location = [latitude_atual, longitude_atual]
 
     return mapa
 
 
 # ============================================================
-# INICIALIZAÇÃO DO SESSION STATE
+# INICIALIZAÇÃO
 # ============================================================
-
-if "ultimo_payload_mqtt" not in st.session_state:
-    st.session_state["ultimo_payload_mqtt"] = {}
-
-if "ultima_mensagem_recebida" not in st.session_state:
-    st.session_state["ultima_mensagem_recebida"] = "Aguardando dados"
-
-if "erro_mqtt" not in st.session_state:
-    st.session_state["erro_mqtt"] = ""
 
 if "tabela_linha" not in st.session_state:
     st.session_state["tabela_linha"] = criar_tabela_fixa()
@@ -372,40 +471,74 @@ if "ultimo_indice_parada" not in st.session_state:
     st.session_state["ultimo_indice_parada"] = None
 
 
-iniciar_mqtt()
+estado_mqtt = iniciar_mqtt()
+snapshot = estado_mqtt.snapshot()
+payload = snapshot["payload"]
 
 
 # ============================================================
-# LEITURA DO ÚLTIMO DADO RECEBIDO
+# LEITURA DO ÚLTIMO PAYLOAD RECEBIDO
 # ============================================================
 
-payload = st.session_state.get("ultimo_payload_mqtt", {})
+latitude = converter_float(
+    obter_valor(payload, ["latitude", "lat"])
+)
 
-latitude = payload.get("latitude", None)
-longitude = payload.get("longitude", None)
+longitude = converter_float(
+    obter_valor(payload, ["longitude", "lon", "lng"])
+)
 
-try:
-    latitude = float(latitude) if latitude is not None else None
-    longitude = float(longitude) if longitude is not None else None
-except:
-    latitude = None
-    longitude = None
+velocidade_float = converter_float(
+    obter_valor(payload, ["velocidade", "speed"], 0)
+)
 
-velocidade = payload.get("velocidade", 0)
-
-try:
-    velocidade = float(velocidade)
-except:
+if velocidade_float is not None:
+    velocidade = int(round(velocidade_float))
+else:
     velocidade = 0
 
-velocidade = int(round(velocidade))
 
-data = payload.get("data", datetime.now().strftime("%d/%m/%Y"))
-hora = payload.get("hora", datetime.now().strftime("%H:%M:%S"))
+data = obter_valor(
+    payload,
+    ["data", "date"],
+    "Aguardando dados"
+)
 
-embarque = payload.get("embarque", "Aguardando dados")
-desembarque = payload.get("desembarque", "Aguardando dados")
-lotacao = payload.get("lotacao", "Aguardando dados")
+hora_local = obter_valor(
+    payload,
+    ["hora_brasil", "hora_local"],
+    None
+)
+
+if hora_local is not None:
+    hora = hora_local
+else:
+    hora = obter_valor(
+        payload,
+        ["hora", "time"],
+        "Aguardando dados"
+    )
+
+    data, hora = converter_data_hora_para_sao_paulo(data, hora)
+
+
+embarque = obter_valor(
+    payload,
+    ["embarque", "embarques"],
+    "Aguardando dados"
+)
+
+desembarque = obter_valor(
+    payload,
+    ["desembarque", "desembarques"],
+    "Aguardando dados"
+)
+
+lotacao = obter_valor(
+    payload,
+    ["lotacao", "lotação", "lotacao_atual", "lotação_atual"],
+    "Aguardando dados"
+)
 
 
 if latitude is not None and longitude is not None:
@@ -446,9 +579,7 @@ st.session_state["tabela_linha"] = atualizar_tabela_fixa(
 # INTERFACE
 # ============================================================
 
-st.title("Dashboard Operacional - Linha 290")
-
-st.caption("Monitoramento em tempo real por GPS, MQTT e sistema embarcado Raspberry Pi 5.")
+st.title("Painel de Controle Next Mobilidade")
 
 
 # ============================================================
@@ -464,10 +595,13 @@ with col2:
     st.metric("Situação", situacao)
 
 with col3:
-    st.metric("Velocidade", f"{velocidade} km/h")
+    if latitude is not None and longitude is not None:
+        st.metric("Velocidade", f"{velocidade} km/h")
+    else:
+        st.metric("Velocidade", "Aguardando dados")
 
 with col4:
-    st.metric("Última atualização", st.session_state["ultima_mensagem_recebida"])
+    st.metric("Última atualização", snapshot["ultima_mensagem"])
 
 
 col5, col6, col7 = st.columns(3)
@@ -479,7 +613,10 @@ with col6:
     st.metric("Trecho", trecho)
 
 with col7:
-    st.metric("Distância da parada", f"{distancia_parada_m} m")
+    if isinstance(distancia_parada_m, (int, float)):
+        st.metric("Distância da parada", f"{distancia_parada_m} m")
+    else:
+        st.metric("Distância da parada", distancia_parada_m)
 
 
 col8, col9, col10 = st.columns(3)
@@ -509,10 +646,16 @@ with col12:
     st.metric("Hora", hora)
 
 with col13:
-    st.metric("Latitude", latitude if latitude is not None else "Aguardando dados")
+    if latitude is not None:
+        st.metric("Latitude", latitude)
+    else:
+        st.metric("Latitude", "Aguardando dados")
 
 with col14:
-    st.metric("Longitude", longitude if longitude is not None else "Aguardando dados")
+    if longitude is not None:
+        st.metric("Longitude", longitude)
+    else:
+        st.metric("Longitude", "Aguardando dados")
 
 
 # ============================================================
@@ -551,11 +694,13 @@ st_folium(
 with st.expander("Status técnico MQTT"):
     st.write("Broker:", MQTT_BROKER)
     st.write("Tópico:", MQTT_TOPIC)
+    st.write("Conectado:", "Sim" if snapshot["conectado"] else "Não")
+    st.write("Última mensagem recebida:", snapshot["ultima_mensagem"])
     st.write("Último payload recebido:")
     st.json(payload)
 
-    if st.session_state["erro_mqtt"]:
-        st.error(st.session_state["erro_mqtt"])
+    if snapshot["erro"]:
+        st.error(snapshot["erro"])
 
 
 # ============================================================
