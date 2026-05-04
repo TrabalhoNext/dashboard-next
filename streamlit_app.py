@@ -29,8 +29,8 @@ MQTT_TOPIC = st.secrets["mqtt"]["topico"]
 MQTT_USUARIO = st.secrets["mqtt"]["usuario"]
 MQTT_SENHA = st.secrets["mqtt"]["senha"]
 
-INTERVALO_ATUALIZACAO = 3
-RAIO_PARADA_METROS = 10
+INTERVALO_ATUALIZACAO = 1
+RAIO_PARADA_METROS = 30
 
 
 # ============================================================
@@ -39,17 +39,17 @@ RAIO_PARADA_METROS = 10
 # ============================================================
 
 PARADAS = [
-    {"nome": "Terminal Diadema", "lat": -23.682681458564325, "lon": -46.62691332328152},
-    {"nome": "Parada Assembleia", "lat": -23.67697409771605, "lon": -46.627793033156586},
-    {"nome": "Parada Divisa", "lat": -23.673551659194004, "lon": -46.63089933449298},
-    {"nome": "Parada Vila Clara", "lat": -23.670446876785558, "lon": -46.63259010672355},
-    {"nome": "Parada Bom Clima", "lat": -23.669120531442708, "lon": -46.63486429031358},
-    {"nome": "Parada São José", "lat": -23.664882066923965, "lon": -46.63779830145058},
-    {"nome": "Parada Americanópolis", "lat": -23.66095067269106, "lon": -46.637240408622645},
-    {"nome": "Parada Faccini", "lat": -23.656897096071692, "lon": -46.63611395876546},
-    {"nome": "Parada Encontro", "lat": -23.652614165456484, "lon": -46.63710571915031},
-    {"nome": "Parada Cidade Vargas", "lat": -23.648791349310596, "lon": -46.64064538509645},
-    {"nome": "Terminal Jabaquara", "lat": -23.646183664190886, "lon": -46.639878302287805},
+    {"nome": "Terminal Diadema", "lat": -23.682681, "lon": -46.626913},
+    {"nome": "Parada Assembleia", "lat": -23.676974, "lon": -46.627793},
+    {"nome": "Parada Divisa", "lat": -23.673551, "lon": -46.630899},
+    {"nome": "Parada Vila Clara", "lat": -23.670446, "lon": -46.632590},
+    {"nome": "Parada Bom Clima", "lat": -23.669120, "lon": -46.634864},
+    {"nome": "Parada São José", "lat": -23.664882, "lon": -46.637798},
+    {"nome": "Parada Americanópolis", "lat": -23.660950, "lon": -46.637240},
+    {"nome": "Parada Faccini", "lat": -23.656897, "lon": -46.636113},
+    {"nome": "Parada Encontro", "lat": -23.652614, "lon": -46.637105},
+    {"nome": "Parada Cidade Vargas", "lat": -23.648791, "lon": -46.640645},
+    {"nome": "Terminal Jabaquara", "lat": -23.646183, "lon": -46.639878},
 ]
 
 
