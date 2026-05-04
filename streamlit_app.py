@@ -3,7 +3,7 @@ import time
 import math
 import html
 import threading
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 
 try:
     from zoneinfo import ZoneInfo
@@ -85,36 +85,8 @@ def converter_float(valor):
 def agora_sao_paulo():
     if ZoneInfo is not None:
         return datetime.now(ZoneInfo("America/Sao_Paulo"))
+
     return datetime.utcnow() - timedelta(hours=3)
-
-
-def ajustar_data_hora(data_valor, hora_valor):
-    if not data_valor:
-        data_valor = "Aguardando dados"
-
-    if not hora_valor:
-        hora_valor = "Aguardando dados"
-
-    try:
-        hora_texto = str(hora_valor).strip()
-
-        if "T" in hora_texto:
-            data_hora = datetime.fromisoformat(hora_texto.replace("Z", "+00:00"))
-
-            if data_hora.tzinfo is None:
-                data_hora = data_hora.replace(tzinfo=timezone.utc)
-
-            if ZoneInfo is not None:
-                data_hora = data_hora.astimezone(ZoneInfo("America/Sao_Paulo"))
-            else:
-                data_hora = data_hora.astimezone(timezone(timedelta(hours=-3)))
-
-            return data_hora.strftime("%d/%m/%Y"), data_hora.strftime("%H:%M:%S")
-
-        return str(data_valor), str(hora_valor)
-
-    except Exception:
-        return str(data_valor), str(hora_valor)
 
 
 def calcular_distancia_metros(lat1, lon1, lat2, lon2):
@@ -166,8 +138,10 @@ def codigo_reason_code(reason_code):
         return int(reason_code)
     except Exception:
         texto = str(reason_code).lower()
+
         if "success" in texto or texto == "0":
             return 0
+
         return -1
 
 
@@ -203,7 +177,11 @@ class EstadoMQTT:
 
         with self.lock:
             self.conectado = codigo == 0
-            self.erro = "" if codigo == 0 else f"Falha de conexão MQTT. Código: {reason_code}"
+
+            if codigo == 0:
+                self.erro = ""
+            else:
+                self.erro = f"Falha de conexão MQTT. Código: {reason_code}"
 
         if codigo == 0:
             client.subscribe(MQTT_TOPIC)
@@ -213,6 +191,7 @@ class EstadoMQTT:
 
         with self.lock:
             self.conectado = False
+
             if codigo != 0:
                 self.erro = f"MQTT desconectado inesperadamente. Código: {reason_code}"
 
@@ -287,39 +266,24 @@ velocidade_float = converter_float(
     obter_valor(payload, ["velocidade", "speed", "velocidade_kmh"])
 )
 
-if velocidade_float is not None:
-    velocidade_card = f"{int(round(velocidade_float))} km/h"
-else:
-    velocidade_card = "Aguardando dados"
 
+# ============================================================
+# DADOS DOS CARDS
+# ============================================================
 
-data = obter_valor(
-    payload,
-    ["data", "date"],
-    "Aguardando dados"
-)
+parada_card = identificar_parada(latitude, longitude)
 
-hora = obter_valor(
-    payload,
-    ["hora", "hora_local", "hora_brasil", "time"],
-    "Aguardando dados"
-)
-
-data, hora = ajustar_data_hora(data, hora)
-
-if data != "Aguardando dados" and hora != "Aguardando dados":
-    data_hora_card = f"{data} {hora}"
-else:
-    data_hora_card = "Aguardando dados"
-
+data_hora_card = agora_sao_paulo().strftime("%d/%m/%Y %H:%M:%S")
 
 if latitude is not None and longitude is not None:
     latitude_longitude_card = f"Lat: {latitude:.6f}\nLon: {longitude:.6f}"
 else:
     latitude_longitude_card = "Aguardando dados"
 
-
-parada_card = identificar_parada(latitude, longitude)
+if velocidade_float is not None:
+    velocidade_card = f"{int(round(velocidade_float))} km/h"
+else:
+    velocidade_card = "Aguardando dados"
 
 
 # ============================================================
