@@ -1,7 +1,2 @@
 streamlit
-pandas
-plotly
 paho-mqtt
-streamlit-autorefresh
-folium
-streamlit-folium
