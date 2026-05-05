@@ -2,12 +2,6 @@ import json
 import time
 import html
 import threading
-from datetime import datetime, timedelta
-
-try:
-    from zoneinfo import ZoneInfo
-except Exception:
-    ZoneInfo = None
 
 import streamlit as st
 import paho.mqtt.client as mqtt
@@ -15,8 +9,16 @@ import paho.mqtt.client as mqtt
 
 # ============================================================
 # DASHBOARD NEXT MOBILIDADE
-# SOMENTE 4 CARDS:
-# PARADA, DATA/HORA, LATITUDE/LONGITUDE, VELOCIDADE
+#
+# Interface simples:
+# - Parada
+# - Data e Hora
+# - Latitude / Longitude
+# - Velocidade
+#
+# O dashboard apenas lê os dados publicados pelo Raspberry Pi.
+# Não calcula parada, não calcula trecho, não calcula sentido,
+# não mostra embarque, desembarque, lotação, mapa ou status MQTT.
 # ============================================================
 
 
@@ -67,13 +69,6 @@ def converter_float(valor):
         return None
 
 
-def agora_sao_paulo():
-    if ZoneInfo is not None:
-        return datetime.now(ZoneInfo("America/Sao_Paulo"))
-
-    return datetime.utcnow() - timedelta(hours=3)
-
-
 def codigo_reason_code(reason_code):
     try:
         return int(reason_code)
@@ -102,15 +97,15 @@ def exibir_card(titulo, valor):
 
 
 # ============================================================
-# MQTT
+# CLASSE MQTT
 # ============================================================
 
 class EstadoMQTT:
     def __init__(self):
         self.lock = threading.Lock()
         self.payload = {}
-        self.erro = ""
         self.conectado = False
+        self.erro = ""
 
     def on_connect(self, client, userdata, flags, reason_code, properties=None):
         codigo = codigo_reason_code(reason_code)
@@ -143,8 +138,8 @@ class EstadoMQTT:
         with self.lock:
             return {
                 "payload": dict(self.payload),
-                "erro": self.erro,
-                "conectado": self.conectado
+                "conectado": self.conectado,
+                "erro": self.erro
             }
 
 
@@ -185,7 +180,7 @@ payload = snapshot["payload"]
 
 
 # ============================================================
-# LEITURA DOS DADOS RECEBIDOS DO MQTT
+# LEITURA DOS DADOS RECEBIDOS DO RASPBERRY VIA MQTT
 # ============================================================
 
 parada_card = obter_valor(
@@ -229,7 +224,7 @@ else:
     data_hora_card = "Aguardando dados"
 
 if latitude is not None and longitude is not None:
-    latitude_longitude_card = f"Lat: {latitude:.6f}\nLon: {longitude:.6f}"
+    latitude_longitude_card = f"Lat: {latitude:.6f}<br>Lon: {longitude:.6f}"
 else:
     latitude_longitude_card = "Aguardando dados"
 
@@ -246,18 +241,22 @@ else:
 st.markdown(
     """
     <style>
+        .stApp {
+            background-color: #ffffff;
+        }
+
         .block-container {
-            padding-top: 3.2rem;
+            padding-top: 4.5rem;
             padding-bottom: 2rem;
+            max-width: 1500px;
         }
 
         .titulo-next {
             font-size: 2.4rem;
             font-weight: 700;
-            margin-bottom: 1.8rem;
+            margin: 0 0 1.8rem 0;
             color: #31333F;
-            line-height: 1.3;
-            padding-top: 0.4rem;
+            line-height: 1.35;
             overflow: visible;
         }
 
@@ -267,7 +266,7 @@ st.markdown(
             padding: 16px 18px;
             height: 120px;
             max-height: 120px;
-            margin-bottom: 14px;
+            margin-bottom: 18px;
             background: rgba(255, 255, 255, 0.02);
             overflow: hidden;
             display: flex;
@@ -278,7 +277,7 @@ st.markdown(
         .card-title-next {
             font-size: 0.85rem;
             opacity: 0.75;
-            margin-bottom: 7px;
+            margin-bottom: 8px;
             line-height: 1.15;
             white-space: nowrap;
             overflow: hidden;
@@ -288,9 +287,10 @@ st.markdown(
         .card-value-next {
             font-size: clamp(1.05rem, 1.35vw, 1.45rem);
             font-weight: 500;
-            line-height: 1.22;
+            line-height: 1.28;
             word-break: break-word;
             white-space: normal;
+            color: #262730;
         }
     </style>
     """,
