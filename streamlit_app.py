@@ -83,7 +83,8 @@ def codigo_reason_code(reason_code):
 
 def exibir_card(titulo, valor):
     titulo = html.escape(str(titulo))
-    valor = html.escape(str(valor)).replace("\n", "<br>")
+    valor = html.escape(str(valor))
+    valor = valor.replace("\n", "<br>")
 
     st.markdown(
         f"""
@@ -224,7 +225,7 @@ else:
     data_hora_card = "Aguardando dados"
 
 if latitude is not None and longitude is not None:
-    latitude_longitude_card = f"Lat: {latitude:.6f}<br>Lon: {longitude:.6f}"
+    latitude_longitude_card = f"Lat: {latitude:.6f}\nLon: {longitude:.6f}"
 else:
     latitude_longitude_card = "Aguardando dados"
 
