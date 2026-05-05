@@ -1,6 +1,5 @@
 import json
 import time
-import math
 import html
 import threading
 from datetime import datetime, timedelta
@@ -12,6 +11,20 @@ except Exception:
 
 import streamlit as st
 import paho.mqtt.client as mqtt
+
+
+# ============================================================
+# DASHBOARD NEXT MOBILIDADE
+# Leitura simples dos dados publicados pelo Raspberry Pi 5
+#
+# Dados esperados via MQTT:
+# - data
+# - hora
+# - latitude
+# - longitude
+# - velocidade
+# - parada_atual
+# ============================================================
 
 
 # ============================================================
@@ -30,34 +43,13 @@ MQTT_USUARIO = st.secrets["mqtt"]["usuario"]
 MQTT_SENHA = st.secrets["mqtt"]["senha"]
 
 INTERVALO_ATUALIZACAO = 1
-RAIO_PARADA_METROS = 30
-
-
-# ============================================================
-# PARADAS DA LINHA 290
-# FORMATO: LATITUDE, LONGITUDE
-# ============================================================
-
-PARADAS = [
-    {"nome": "Terminal Diadema", "lat": -23.682681, "lon": -46.626913},
-    {"nome": "Parada Assembleia", "lat": -23.676974, "lon": -46.627793},
-    {"nome": "Parada Divisa", "lat": -23.673551, "lon": -46.630899},
-    {"nome": "Parada Vila Clara", "lat": -23.670446, "lon": -46.632590},
-    {"nome": "Parada Bom Clima", "lat": -23.669120, "lon": -46.634864},
-    {"nome": "Parada São José", "lat": -23.664882, "lon": -46.637798},
-    {"nome": "Parada Americanópolis", "lat": -23.660950, "lon": -46.637240},
-    {"nome": "Parada Faccini", "lat": -23.656897, "lon": -46.636113},
-    {"nome": "Parada Encontro", "lat": -23.652614, "lon": -46.637105},
-    {"nome": "Parada Cidade Vargas", "lat": -23.648791, "lon": -46.640645},
-    {"nome": "Terminal Jabaquara", "lat": -23.646183, "lon": -46.639878},
-]
 
 
 # ============================================================
 # FUNÇÕES AUXILIARES
 # ============================================================
 
-def obter_valor(dados, chaves, padrao=None):
+def obter_valor(dados, chaves, padrao="Aguardando dados"):
     for chave in chaves:
         valor = dados.get(chave)
         if valor is not None and valor != "":
@@ -87,50 +79,6 @@ def agora_sao_paulo():
         return datetime.now(ZoneInfo("America/Sao_Paulo"))
 
     return datetime.utcnow() - timedelta(hours=3)
-
-
-def calcular_distancia_metros(lat1, lon1, lat2, lon2):
-    raio_terra = 6371000
-
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
-
-    a = (
-        math.sin(delta_phi / 2) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
-    )
-
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-    return raio_terra * c
-
-
-def identificar_parada(latitude, longitude):
-    if latitude is None or longitude is None:
-        return "Aguardando dados"
-
-    menor_distancia = float("inf")
-    parada_mais_proxima = None
-
-    for parada in PARADAS:
-        distancia = calcular_distancia_metros(
-            latitude,
-            longitude,
-            parada["lat"],
-            parada["lon"]
-        )
-
-        if distancia < menor_distancia:
-            menor_distancia = distancia
-            parada_mais_proxima = parada
-
-    if parada_mais_proxima is not None and menor_distancia <= RAIO_PARADA_METROS:
-        return parada_mais_proxima["nome"]
-
-    return "Em rota"
 
 
 def codigo_reason_code(reason_code):
@@ -172,7 +120,7 @@ class EstadoMQTT:
         self.erro = ""
         self.conectado = False
 
-    def on_connect(self, client, userdata, flags, reason_code, properties):
+    def on_connect(self, client, userdata, flags, reason_code, properties=None):
         codigo = codigo_reason_code(reason_code)
 
         with self.lock:
@@ -186,7 +134,8 @@ class EstadoMQTT:
         if codigo == 0:
             client.subscribe(MQTT_TOPIC)
 
-    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+    def on_disconnect(self, client, userdata, *args):
+        reason_code = args[-2] if len(args) >= 2 else args[-1] if args else 0
         codigo = codigo_reason_code(reason_code)
 
         with self.lock:
@@ -223,10 +172,15 @@ class EstadoMQTT:
 def iniciar_mqtt():
     estado = EstadoMQTT()
 
-    client = mqtt.Client(
-        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-        client_id=f"dashboard_next_{int(time.time())}"
-    )
+    try:
+        client = mqtt.Client(
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+            client_id=f"dashboard_next_{int(time.time())}"
+        )
+    except Exception:
+        client = mqtt.Client(
+            client_id=f"dashboard_next_{int(time.time())}"
+        )
 
     client.username_pw_set(MQTT_USUARIO, MQTT_SENHA)
     client.tls_set()
@@ -251,29 +205,48 @@ payload = snapshot["payload"]
 
 
 # ============================================================
-# LEITURA DO PAYLOAD MQTT
+# LEITURA DOS DADOS RECEBIDOS DO MQTT
 # ============================================================
 
+parada_card = obter_valor(
+    payload,
+    ["parada_atual", "parada"],
+    "Aguardando dados"
+)
+
+data = obter_valor(
+    payload,
+    ["data"],
+    ""
+)
+
+hora = obter_valor(
+    payload,
+    ["hora"],
+    ""
+)
+
 latitude = converter_float(
-    obter_valor(payload, ["latitude", "lat"])
+    obter_valor(payload, ["latitude", "lat"], None)
 )
 
 longitude = converter_float(
-    obter_valor(payload, ["longitude", "lon", "lng"])
+    obter_valor(payload, ["longitude", "lon", "lng"], None)
 )
 
 velocidade_float = converter_float(
-    obter_valor(payload, ["velocidade", "speed", "velocidade_kmh"])
+    obter_valor(payload, ["velocidade", "speed", "velocidade_kmh"], None)
 )
 
 
 # ============================================================
-# DADOS DOS CARDS
+# FORMATAÇÃO DOS CARDS
 # ============================================================
 
-parada_card = identificar_parada(latitude, longitude)
-
-data_hora_card = agora_sao_paulo().strftime("%d/%m/%Y %H:%M:%S")
+if data != "" and hora != "":
+    data_hora_card = f"{data} {hora}"
+else:
+    data_hora_card = "Aguardando dados"
 
 if latitude is not None and longitude is not None:
     latitude_longitude_card = f"Lat: {latitude:.6f}\nLon: {longitude:.6f}"
@@ -301,8 +274,14 @@ st.markdown(
         .titulo-next {
             font-size: 2.4rem;
             font-weight: 700;
-            margin-bottom: 1.5rem;
+            margin-bottom: 0.4rem;
             color: #31333F;
+        }
+
+        .subtitulo-next {
+            font-size: 1rem;
+            color: rgba(49, 51, 63, 0.70);
+            margin-bottom: 1.5rem;
         }
 
         .card-next {
@@ -336,6 +315,16 @@ st.markdown(
             word-break: break-word;
             white-space: normal;
         }
+
+        .status-ok {
+            color: #1f7a1f;
+            font-size: 0.9rem;
+        }
+
+        .status-erro {
+            color: #b00020;
+            font-size: 0.9rem;
+        }
     </style>
     """,
     unsafe_allow_html=True
@@ -353,6 +342,11 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+st.markdown(
+    '<div class="subtitulo-next">Leitura em tempo real dos dados publicados pelo Raspberry Pi 5 via MQTT.</div>',
+    unsafe_allow_html=True
+)
+
 col1, col2 = st.columns(2)
 
 with col1:
@@ -361,7 +355,6 @@ with col1:
 with col2:
     exibir_card("Data e Hora", data_hora_card)
 
-
 col3, col4 = st.columns(2)
 
 with col3:
@@ -369,6 +362,27 @@ with col3:
 
 with col4:
     exibir_card("Velocidade", velocidade_card)
+
+
+# ============================================================
+# STATUS DE COMUNICAÇÃO
+# ============================================================
+
+st.markdown("---")
+
+if snapshot["conectado"]:
+    st.markdown(
+        f'<div class="status-ok">MQTT conectado | Última mensagem recebida: {snapshot["ultima_mensagem"]}</div>',
+        unsafe_allow_html=True
+    )
+else:
+    st.markdown(
+        '<div class="status-erro">MQTT desconectado ou aguardando conexão.</div>',
+        unsafe_allow_html=True
+    )
+
+if snapshot["erro"]:
+    st.warning(snapshot["erro"])
 
 
 # ============================================================
