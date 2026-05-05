@@ -17,8 +17,6 @@ import paho.mqtt.client as mqtt
 # - Velocidade
 #
 # O dashboard apenas lê os dados publicados pelo Raspberry Pi.
-# Não calcula parada, não calcula trecho, não calcula sentido,
-# não mostra embarque, desembarque, lotação, mapa ou status MQTT.
 # ============================================================
 
 
