@@ -15,15 +15,8 @@ import paho.mqtt.client as mqtt
 
 # ============================================================
 # DASHBOARD NEXT MOBILIDADE
-# Leitura simples dos dados publicados pelo Raspberry Pi 5
-#
-# Dados esperados via MQTT:
-# - data
-# - hora
-# - latitude
-# - longitude
-# - velocidade
-# - parada_atual
+# SOMENTE 4 CARDS:
+# PARADA, DATA/HORA, LATITUDE/LONGITUDE, VELOCIDADE
 # ============================================================
 
 
@@ -116,7 +109,6 @@ class EstadoMQTT:
     def __init__(self):
         self.lock = threading.Lock()
         self.payload = {}
-        self.ultima_mensagem = "Aguardando dados"
         self.erro = ""
         self.conectado = False
 
@@ -125,24 +117,14 @@ class EstadoMQTT:
 
         with self.lock:
             self.conectado = codigo == 0
-
-            if codigo == 0:
-                self.erro = ""
-            else:
-                self.erro = f"Falha de conexão MQTT. Código: {reason_code}"
+            self.erro = "" if codigo == 0 else f"Falha MQTT. Código: {reason_code}"
 
         if codigo == 0:
             client.subscribe(MQTT_TOPIC)
 
     def on_disconnect(self, client, userdata, *args):
-        reason_code = args[-2] if len(args) >= 2 else args[-1] if args else 0
-        codigo = codigo_reason_code(reason_code)
-
         with self.lock:
             self.conectado = False
-
-            if codigo != 0:
-                self.erro = f"MQTT desconectado inesperadamente. Código: {reason_code}"
 
     def on_message(self, client, userdata, msg):
         try:
@@ -151,18 +133,16 @@ class EstadoMQTT:
 
             with self.lock:
                 self.payload = dados
-                self.ultima_mensagem = agora_sao_paulo().strftime("%d/%m/%Y %H:%M:%S")
                 self.erro = ""
 
         except Exception as erro:
             with self.lock:
-                self.erro = f"Erro ao ler payload MQTT: {erro}"
+                self.erro = str(erro)
 
     def snapshot(self):
         with self.lock:
             return {
                 "payload": dict(self.payload),
-                "ultima_mensagem": self.ultima_mensagem,
                 "erro": self.erro,
                 "conectado": self.conectado
             }
@@ -267,21 +247,18 @@ st.markdown(
     """
     <style>
         .block-container {
-            padding-top: 1.5rem;
+            padding-top: 3.2rem;
             padding-bottom: 2rem;
         }
 
         .titulo-next {
             font-size: 2.4rem;
             font-weight: 700;
-            margin-bottom: 0.4rem;
+            margin-bottom: 1.8rem;
             color: #31333F;
-        }
-
-        .subtitulo-next {
-            font-size: 1rem;
-            color: rgba(49, 51, 63, 0.70);
-            margin-bottom: 1.5rem;
+            line-height: 1.3;
+            padding-top: 0.4rem;
+            overflow: visible;
         }
 
         .card-next {
@@ -315,16 +292,6 @@ st.markdown(
             word-break: break-word;
             white-space: normal;
         }
-
-        .status-ok {
-            color: #1f7a1f;
-            font-size: 0.9rem;
-        }
-
-        .status-erro {
-            color: #b00020;
-            font-size: 0.9rem;
-        }
     </style>
     """,
     unsafe_allow_html=True
@@ -334,16 +301,10 @@ st.markdown(
 # ============================================================
 # INTERFACE
 # SOMENTE 4 CARDS
-# ORDEM: PARADA, DATA/HORA, LATITUDE/LONGITUDE, VELOCIDADE
 # ============================================================
 
 st.markdown(
     '<div class="titulo-next">Painel Next Mobilidade</div>',
-    unsafe_allow_html=True
-)
-
-st.markdown(
-    '<div class="subtitulo-next">Leitura em tempo real dos dados publicados pelo Raspberry Pi 5 via MQTT.</div>',
     unsafe_allow_html=True
 )
 
@@ -362,27 +323,6 @@ with col3:
 
 with col4:
     exibir_card("Velocidade", velocidade_card)
-
-
-# ============================================================
-# STATUS DE COMUNICAÇÃO
-# ============================================================
-
-st.markdown("---")
-
-if snapshot["conectado"]:
-    st.markdown(
-        f'<div class="status-ok">MQTT conectado | Última mensagem recebida: {snapshot["ultima_mensagem"]}</div>',
-        unsafe_allow_html=True
-    )
-else:
-    st.markdown(
-        '<div class="status-erro">MQTT desconectado ou aguardando conexão.</div>',
-        unsafe_allow_html=True
-    )
-
-if snapshot["erro"]:
-    st.warning(snapshot["erro"])
 
 
 # ============================================================
