@@ -15,8 +15,13 @@ import paho.mqtt.client as mqtt
 # - Data e Hora
 # - Latitude / Longitude
 # - Velocidade
+# - Embarque
+# - Desembarque
+# - Lotação Atual
 #
-# O dashboard apenas lê os dados publicados pelo Raspberry Pi.
+# O dashboard lê dois tópicos MQTT:
+# - GPS: next/linha290/gps
+# - Contagem: next/linha290/contagem
 # ============================================================
 
 
@@ -31,9 +36,14 @@ st.set_page_config(
 
 MQTT_BROKER = st.secrets["mqtt"]["broker"]
 MQTT_PORT = int(st.secrets["mqtt"]["porta"])
-MQTT_TOPIC = st.secrets["mqtt"]["topico"]
 MQTT_USUARIO = st.secrets["mqtt"]["usuario"]
 MQTT_SENHA = st.secrets["mqtt"]["senha"]
+
+# Tópico atual do GPS, já configurado no Streamlit Secrets
+MQTT_TOPIC_GPS = st.secrets["mqtt"]["topico"]
+
+# Novo tópico da detecção de pessoas
+MQTT_TOPIC_CONTAGEM = "next/linha290/contagem"
 
 INTERVALO_ATUALIZACAO = 1
 
@@ -65,6 +75,16 @@ def converter_float(valor):
         return float(valor)
     except Exception:
         return None
+
+
+def converter_inteiro(valor, padrao="Aguardando dados"):
+    if valor is None or valor == "":
+        return padrao
+
+    try:
+        return int(float(valor))
+    except Exception:
+        return padrao
 
 
 def codigo_reason_code(reason_code):
@@ -102,7 +122,8 @@ def exibir_card(titulo, valor):
 class EstadoMQTT:
     def __init__(self):
         self.lock = threading.Lock()
-        self.payload = {}
+        self.payload_gps = {}
+        self.payload_contagem = {}
         self.conectado = False
         self.erro = ""
 
@@ -114,7 +135,8 @@ class EstadoMQTT:
             self.erro = "" if codigo == 0 else f"Falha MQTT. Código: {reason_code}"
 
         if codigo == 0:
-            client.subscribe(MQTT_TOPIC)
+            client.subscribe(MQTT_TOPIC_GPS)
+            client.subscribe(MQTT_TOPIC_CONTAGEM)
 
     def on_disconnect(self, client, userdata, *args):
         with self.lock:
@@ -126,7 +148,12 @@ class EstadoMQTT:
             dados = json.loads(texto)
 
             with self.lock:
-                self.payload = dados
+                if msg.topic == MQTT_TOPIC_GPS:
+                    self.payload_gps = dados
+
+                elif msg.topic == MQTT_TOPIC_CONTAGEM:
+                    self.payload_contagem = dados
+
                 self.erro = ""
 
         except Exception as erro:
@@ -136,7 +163,8 @@ class EstadoMQTT:
     def snapshot(self):
         with self.lock:
             return {
-                "payload": dict(self.payload),
+                "payload_gps": dict(self.payload_gps),
+                "payload_contagem": dict(self.payload_contagem),
                 "conectado": self.conectado,
                 "erro": self.erro
             }
@@ -175,46 +203,67 @@ def iniciar_mqtt():
 
 estado_mqtt = iniciar_mqtt()
 snapshot = estado_mqtt.snapshot()
-payload = snapshot["payload"]
+
+payload_gps = snapshot["payload_gps"]
+payload_contagem = snapshot["payload_contagem"]
 
 
 # ============================================================
-# LEITURA DOS DADOS RECEBIDOS DO RASPBERRY VIA MQTT
+# LEITURA DOS DADOS DO GPS
+# Tópico: next/linha290/gps
 # ============================================================
 
 parada_card = obter_valor(
-    payload,
+    payload_gps,
     ["parada_atual", "parada"],
     "Aguardando dados"
 )
 
 data = obter_valor(
-    payload,
+    payload_gps,
     ["data"],
     ""
 )
 
 hora = obter_valor(
-    payload,
+    payload_gps,
     ["hora"],
     ""
 )
 
 latitude = converter_float(
-    obter_valor(payload, ["latitude", "lat"], None)
+    obter_valor(payload_gps, ["latitude", "lat"], None)
 )
 
 longitude = converter_float(
-    obter_valor(payload, ["longitude", "lon", "lng"], None)
+    obter_valor(payload_gps, ["longitude", "lon", "lng"], None)
 )
 
 velocidade_float = converter_float(
-    obter_valor(payload, ["velocidade", "speed", "velocidade_kmh"], None)
+    obter_valor(payload_gps, ["velocidade", "speed", "velocidade_kmh"], None)
 )
 
 
 # ============================================================
-# FORMATAÇÃO DOS CARDS
+# LEITURA DOS DADOS DA DETECÇÃO
+# Tópico: next/linha290/contagem
+# ============================================================
+
+embarque_card = converter_inteiro(
+    obter_valor(payload_contagem, ["embarque"], None)
+)
+
+desembarque_card = converter_inteiro(
+    obter_valor(payload_contagem, ["desembarque"], None)
+)
+
+lotacao_card = converter_inteiro(
+    obter_valor(payload_contagem, ["lotacao_atual"], None)
+)
+
+
+# ============================================================
+# FORMATAÇÃO DOS CARDS DO GPS
 # ============================================================
 
 if data != "" and hora != "":
@@ -299,7 +348,7 @@ st.markdown(
 
 # ============================================================
 # INTERFACE
-# SOMENTE 4 CARDS
+# 7 CARDS
 # ============================================================
 
 st.markdown(
@@ -322,6 +371,17 @@ with col3:
 
 with col4:
     exibir_card("Velocidade", velocidade_card)
+
+col5, col6, col7 = st.columns(3)
+
+with col5:
+    exibir_card("Embarque", embarque_card)
+
+with col6:
+    exibir_card("Desembarque", desembarque_card)
+
+with col7:
+    exibir_card("Lotação Atual", lotacao_card)
 
 
 # ============================================================
