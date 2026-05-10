@@ -63,20 +63,12 @@ def codigo_reason_code(reason_code):
 
 
 def montar_subtitulo(dados):
-    subtitulo = obter_valor(
-        dados,
-        ["subtitulo_linha"],
-        None
-    )
+    subtitulo = obter_valor(dados, ["subtitulo_linha"], None)
 
     if subtitulo:
         return subtitulo
 
-    sentido = obter_valor(
-        dados,
-        ["sentido"],
-        ""
-    )
+    sentido = obter_valor(dados, ["sentido"], "")
 
     if sentido == "Terminal Diadema - Terminal Jabaquara":
         return "Linha 290 Terminal Diadema - Terminal Jabaquara"
@@ -84,7 +76,7 @@ def montar_subtitulo(dados):
     if sentido == "Terminal Jabaquara - Terminal Diadema":
         return "Linha 290 Terminal Jabaquara - Terminal Diadema"
 
-    return "Linha 290"
+    return "Linha 290 - Aguardando sentido"
 
 
 def montar_parada(dados):
@@ -101,15 +93,6 @@ def montar_parada(dados):
 
 
 def montar_coordenadas(dados):
-    coordenadas = obter_valor(
-        dados,
-        ["coordenadas"],
-        None
-    )
-
-    if coordenadas:
-        return coordenadas
-
     latitude = obter_valor(dados, ["latitude", "lat"], None)
     longitude = obter_valor(dados, ["longitude", "lon", "lng"], None)
 
@@ -120,29 +103,29 @@ def montar_coordenadas(dados):
         latitude = float(latitude)
         longitude = float(longitude)
 
-        return f"Lat: {latitude:.6f}\nLon: {longitude:.6f}"
+        return f"Latitude: {latitude:.6f}\nLongitude: {longitude:.6f}"
 
     except Exception:
-        return f"{latitude}, {longitude}"
+        return f"Latitude: {latitude}\nLongitude: {longitude}"
 
 
 def montar_data_hora(dados):
-    data_hora = obter_valor(
-        dados,
-        ["data_hora"],
-        None
-    )
-
-    if data_hora:
-        return data_hora
-
     data = obter_valor(dados, ["data"], None)
     hora = obter_valor(dados, ["hora"], None)
 
     if data and hora:
-        return f"{data} {hora}"
+        return f"Data: {data}\nHora: {hora}"
 
-    return agora_sao_paulo().strftime("%d/%m/%Y %H:%M:%S")
+    data_hora = obter_valor(dados, ["data_hora"], None)
+
+    if data_hora:
+        partes = str(data_hora).split(" ")
+        if len(partes) >= 2:
+            return f"Data: {partes[0]}\nHora: {partes[1]}"
+        return str(data_hora)
+
+    agora = agora_sao_paulo()
+    return f"Data: {agora.strftime('%d/%m/%Y')}\nHora: {agora.strftime('%H:%M:%S')}"
 
 
 def montar_embarque(dados):
@@ -181,7 +164,6 @@ class EstadoMQTT:
     def __init__(self):
         self.lock = threading.Lock()
         self.payload = {}
-        self.ultima_mensagem = "Aguardando dados"
         self.erro = ""
         self.conectado = False
 
@@ -190,11 +172,7 @@ class EstadoMQTT:
 
         with self.lock:
             self.conectado = codigo == 0
-
-            if codigo == 0:
-                self.erro = ""
-            else:
-                self.erro = f"Falha de conexão MQTT. Código: {reason_code}"
+            self.erro = "" if codigo == 0 else f"Falha de conexão MQTT. Código: {reason_code}"
 
         if codigo == 0:
             client.subscribe(MQTT_TOPIC)
@@ -215,7 +193,6 @@ class EstadoMQTT:
 
             with self.lock:
                 self.payload = dados
-                self.ultima_mensagem = agora_sao_paulo().strftime("%d/%m/%Y %H:%M:%S")
                 self.erro = ""
 
         except Exception as erro:
@@ -226,7 +203,6 @@ class EstadoMQTT:
         with self.lock:
             return {
                 "payload": dict(self.payload),
-                "ultima_mensagem": self.ultima_mensagem,
                 "erro": self.erro,
                 "conectado": self.conectado
             }
@@ -282,44 +258,52 @@ st.markdown(
     """
     <style>
         .block-container {
-            padding-top: 1.5rem;
+            padding-top: 1.3rem;
             padding-bottom: 2rem;
+            max-width: 1500px;
         }
 
         .titulo-next {
-            font-size: 2.4rem;
+            width: 100%;
+            font-size: clamp(2rem, 3vw, 3rem);
             font-weight: 700;
-            margin-bottom: 0.2rem;
+            margin-bottom: 0.25rem;
             color: #31333F;
             text-align: center;
+            line-height: 1.15;
+            white-space: normal;
+            overflow: visible;
         }
 
         .subtitulo-next {
-            font-size: 1.15rem;
+            width: 100%;
+            font-size: clamp(1rem, 1.4vw, 1.35rem);
             font-weight: 400;
             margin-bottom: 1.8rem;
             color: rgba(49, 51, 63, 0.78);
             text-align: center;
+            line-height: 1.3;
+            white-space: normal;
+            overflow: visible;
         }
 
         .card-next {
-            border: 1px solid rgba(49, 51, 63, 0.16);
-            border-radius: 14px;
-            padding: 16px 18px;
-            height: 125px;
-            max-height: 125px;
-            margin-bottom: 14px;
+            border: 2.2px solid rgba(49, 51, 63, 0.32);
+            border-radius: 15px;
+            padding: 18px 20px;
+            min-height: 135px;
+            margin-bottom: 16px;
             background: rgba(255, 255, 255, 0.02);
-            overflow: hidden;
+            overflow: visible;
             display: flex;
             flex-direction: column;
             justify-content: flex-start;
         }
 
         .card-title-next {
-            font-size: 0.85rem;
-            opacity: 0.75;
-            margin-bottom: 7px;
+            font-size: 0.9rem;
+            opacity: 0.78;
+            margin-bottom: 9px;
             line-height: 1.15;
             white-space: nowrap;
             overflow: hidden;
@@ -327,18 +311,11 @@ st.markdown(
         }
 
         .card-value-next {
-            font-size: clamp(1.05rem, 1.35vw, 1.45rem);
+            font-size: clamp(1.12rem, 1.45vw, 1.6rem);
             font-weight: 500;
-            line-height: 1.22;
+            line-height: 1.35;
             word-break: break-word;
             white-space: normal;
-        }
-
-        .status-next {
-            font-size: 0.80rem;
-            color: rgba(49, 51, 63, 0.62);
-            margin-top: 1.2rem;
-            text-align: center;
         }
 
         .erro-next {
@@ -385,20 +362,12 @@ with col4:
 
 
 # ============================================================
-# STATUS TÉCNICO DISCRETO
+# ERRO TÉCNICO SOMENTE SE OCORRER
 # ============================================================
 
 if snapshot["erro"]:
     st.markdown(
         f'<div class="erro-next">{html.escape(snapshot["erro"])}</div>',
-        unsafe_allow_html=True
-    )
-else:
-    status = "conectado" if snapshot["conectado"] else "conectando"
-    ultima = snapshot["ultima_mensagem"]
-
-    st.markdown(
-        f'<div class="status-next">MQTT: {status} | Última mensagem: {html.escape(str(ultima))}</div>',
         unsafe_allow_html=True
     )
 
