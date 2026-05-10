@@ -1,439 +1,411 @@
-from dash import Dash, html, dcc, Input, Output, dash_table
-import plotly.graph_objects as go
-from math import radians, sin, cos, sqrt, atan2
-import paho.mqtt.client as mqtt
 import json
+import time
+import html
 import threading
+from datetime import datetime, timedelta
 
-app = Dash(__name__)
-server = app.server
-app.title = "Dashboard Next Mobilidade"
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 
-import os
-
-BROKER = os.getenv("MQTT_HOST", "localhost")
-PORTA = int(os.getenv("MQTT_PORT", "1883"))
-TOPICO = os.getenv("MQTT_TOPIC", "next/linha290/dados") 
-dados_lock = threading.Lock()
+import streamlit as st
+import paho.mqtt.client as mqtt
 
 
-PARADAS_DECLARADAS = [
-    {"nome": "Terminal Diadema", "lat": -23.682681458564325, "lon": -46.62691332328152},
-    {"nome": "Parada Assembleia", "lat": -23.67697409771605, "lon": -46.627793033156586},
-    {"nome": "Parada Divisa", "lat": -23.673551659194004, "lon": -46.63089933449298},
-    {"nome": "Parada Vila Clara", "lat": -23.670446876785558, "lon": -46.63259010672355},
-    {"nome": "Parada Bom Clima", "lat": -23.669120531442708, "lon": -46.63486429031358},
-    {"nome": "Parada São José", "lat": -23.664882066923965, "lon": -46.63779830145058},
-    {"nome": "Parada Americanópolis", "lat": -23.66095067269106, "lon": -46.637240408622645},
-    {"nome": "Parada Faccini", "lat": -23.656897096071692, "lon": -46.63611395876546},
-    {"nome": "Parada Encontro", "lat": -23.652614165456484, "lon": -46.63710571915031},
-    {"nome": "Parada Cidade Vargas", "lat": -23.648791349310596, "lon": -46.64064538509645},
-    {"nome": "Terminal Jabaquara", "lat": -23.646183664190886, "lon": -46.639878302287805}
-]
+# ============================================================
+# CONFIGURAÇÕES GERAIS
+# ============================================================
 
-def criar_tabela_operacional_inicial():
-    tabela = []
-    for parada in PARADAS_DECLARADAS:
-        tabela.append({
-            "parada_terminal": parada["nome"],
-            "horario": "--:--:--",
-            "embarque": 0,
-            "desembarque": 0,
-            "pessoas_no_onibus": 0
-        })
-    return tabela
+st.set_page_config(
+    page_title="Painel Next Mobilidade",
+    layout="wide"
+)
 
-eventos_operacionais = criar_tabela_operacional_inicial()
+MQTT_BROKER = st.secrets["mqtt"]["broker"]
+MQTT_PORT = int(st.secrets["mqtt"]["porta"])
+MQTT_TOPIC = st.secrets["mqtt"]["topico"]
+MQTT_USUARIO = st.secrets["mqtt"]["usuario"]
+MQTT_SENHA = st.secrets["mqtt"]["senha"]
 
-dados_onibus = {
-    "linha": "290",
-    "situacao": "Em movimento",
-    "sentido": "Diadema → Jabaquara",
-    "trecho_real": "Aguardando dados MQTT",
-    "horario": "--:--:--",
-    "embarque": 0,
-    "desembarque": 0,
-    "pessoas_no_onibus": 0,
-    "latitude": -23.682681458564325,
-    "longitude": -46.62691332328152
-}
+INTERVALO_ATUALIZACAO = 1
 
-def card_style():
-    return {
-        "backgroundColor": "white",
-        "padding": "20px",
-        "borderRadius": "12px",
-        "boxShadow": "0 2px 8px rgba(0,0,0,0.1)",
-        "textAlign": "center",
-        "fontFamily": "Arial",
-        "color": "#1f2d3d"
-    }
 
-def box_style():
-    return {
-        "backgroundColor": "white",
-        "padding": "20px",
-        "borderRadius": "12px",
-        "boxShadow": "0 2px 8px rgba(0,0,0,0.1)"
-    }
+# ============================================================
+# FUNÇÕES AUXILIARES
+# ============================================================
 
-def montar_card(titulo, valor):
-    return [
-        html.Div(
-            titulo,
-            style={
-                "fontSize": "18px",
-                "fontWeight": "bold",
-                "marginBottom": "10px"
-            }
-        ),
-        html.Div(
-            str(valor),
-            style={
-                "fontSize": "20px",
-                "fontWeight": "bold"
-            }
-        )
-    ]
+def obter_valor(dados, chaves, padrao=None):
+    for chave in chaves:
+        valor = dados.get(chave)
+        if valor is not None and valor != "":
+            return valor
+    return padrao
 
-def distancia_metros(lat1, lon1, lat2, lon2):
-    raio_terra = 6371000
 
-    lat1 = radians(lat1)
-    lon1 = radians(lon1)
-    lat2 = radians(lat2)
-    lon2 = radians(lon2)
+def agora_sao_paulo():
+    if ZoneInfo is not None:
+        return datetime.now(ZoneInfo("America/Sao_Paulo"))
 
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
+    return datetime.utcnow() - timedelta(hours=3)
 
-    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
-    c = 2 * atan2(sqrt(a), sqrt(1 - a))
 
-    return raio_terra * c
-
-def encontrar_parada_mais_proxima(lat_onibus, lon_onibus):
-    parada_mais_proxima = None
-    menor_distancia = float("inf")
-
-    for parada in PARADAS_DECLARADAS:
-        dist = distancia_metros(lat_onibus, lon_onibus, parada["lat"], parada["lon"])
-        if dist < menor_distancia:
-            menor_distancia = dist
-            parada_mais_proxima = parada["nome"]
-
-    return parada_mais_proxima, menor_distancia
-
-def obter_parada_atual_por_estado(situacao, latitude, longitude):
-    situacao = str(situacao).strip().lower()
-
-    if situacao != "parado":
-        return "Em deslocamento"
-
-    parada, distancia = encontrar_parada_mais_proxima(latitude, longitude)
-
-    if distancia <= 120:
-        return parada
-
-    return "Parada não identificada"
-
-def atualizar_tabela_operacional(nome_parada, horario, embarque, desembarque, pessoas_no_onibus):
-    for linha in eventos_operacionais:
-        if linha["parada_terminal"] == nome_parada:
-            linha["horario"] = horario
-            linha["embarque"] = embarque
-            linha["desembarque"] = desembarque
-            linha["pessoas_no_onibus"] = pessoas_no_onibus
-            break
-
-def criar_grafico_resumo():
-    with dados_lock:
-        categorias = ["Embarque", "Desembarque", "Pessoas no Ônibus"]
-        valores = [
-            dados_onibus["embarque"],
-            dados_onibus["desembarque"],
-            dados_onibus["pessoas_no_onibus"]
-        ]
-
-    fig = go.Figure(
-        data=[
-            go.Bar(
-                x=categorias,
-                y=valores,
-                text=valores,
-                textposition="outside"
-            )
-        ]
-    )
-
-    fig.update_layout(
-        title="Resumo Operacional Atual",
-        template="plotly_white",
-        height=360,
-        margin=dict(l=40, r=20, t=60, b=40),
-        yaxis_title="Quantidade"
-    )
-
-    return fig
-
-def criar_mapa():
-    with dados_lock:
-        latitude = dados_onibus["latitude"]
-        longitude = dados_onibus["longitude"]
-        linha = dados_onibus["linha"]
-
-    fig = go.Figure(
-        go.Scattermap(
-            lat=[latitude],
-            lon=[longitude],
-            mode="markers+text",
-            text=[f"Linha {linha}"],
-            textposition="top right"
-        )
-    )
-
-    fig.update_layout(
-        title="Mapa da Posição Atual do Ônibus",
-        height=430,
-        margin=dict(l=20, r=20, t=60, b=20),
-        map=dict(
-            style="open-street-map",
-            center=dict(
-                lat=latitude,
-                lon=longitude
-            ),
-            zoom=13
-        )
-    )
-
-    return fig
-
-def on_connect(client, userdata, flags, reason_code, properties=None):
-    if reason_code == 0:
-        print("Conectado ao broker MQTT com sucesso.")
-        client.subscribe(TOPICO)
-        print(f"Inscrito no tópico: {TOPICO}")
-    else:
-        print(f"Falha ao conectar ao broker. Código: {reason_code}")
-
-def on_message(client, userdata, msg):
+def codigo_reason_code(reason_code):
     try:
-        mensagem = json.loads(msg.payload.decode("utf-8"))
-        print("Mensagem MQTT recebida:")
-        print(mensagem)
+        return int(reason_code)
+    except Exception:
+        texto = str(reason_code).lower()
 
-        with dados_lock:
-            dados_onibus["linha"] = mensagem.get("linha", dados_onibus["linha"])
-            dados_onibus["situacao"] = mensagem.get("situacao", dados_onibus["situacao"])
-            dados_onibus["sentido"] = mensagem.get("sentido", dados_onibus["sentido"])
-            dados_onibus["trecho_real"] = mensagem.get("trecho_real", dados_onibus["trecho_real"])
-            dados_onibus["horario"] = mensagem.get("horario", dados_onibus["horario"])
-            dados_onibus["embarque"] = mensagem.get("embarque", dados_onibus["embarque"])
-            dados_onibus["desembarque"] = mensagem.get("desembarque", dados_onibus["desembarque"])
-            dados_onibus["pessoas_no_onibus"] = mensagem.get("pessoas_no_onibus", dados_onibus["pessoas_no_onibus"])
-            dados_onibus["latitude"] = mensagem.get("latitude", dados_onibus["latitude"])
-            dados_onibus["longitude"] = mensagem.get("longitude", dados_onibus["longitude"])
+        if "success" in texto or texto == "0":
+            return 0
 
-            situacao = str(dados_onibus["situacao"]).strip().lower()
-            latitude = float(dados_onibus["latitude"])
-            longitude = float(dados_onibus["longitude"])
-            horario = dados_onibus["horario"]
-            embarque = dados_onibus["embarque"]
-            desembarque = dados_onibus["desembarque"]
-            pessoas = dados_onibus["pessoas_no_onibus"]
+        return -1
 
-        if situacao == "parado":
-            parada, distancia = encontrar_parada_mais_proxima(latitude, longitude)
-            if distancia <= 120:
-                atualizar_tabela_operacional(
-                    nome_parada=parada,
-                    horario=horario,
-                    embarque=embarque,
-                    desembarque=desembarque,
-                    pessoas_no_onibus=pessoas
-                )
 
-    except Exception as e:
-        print(f"Erro ao processar mensagem MQTT: {e}")
+def montar_subtitulo(dados):
+    subtitulo = obter_valor(
+        dados,
+        ["subtitulo_linha"],
+        None
+    )
 
+    if subtitulo:
+        return subtitulo
+
+    sentido = obter_valor(
+        dados,
+        ["sentido"],
+        ""
+    )
+
+    if sentido == "Terminal Diadema - Terminal Jabaquara":
+        return "Linha 290 Terminal Diadema - Terminal Jabaquara"
+
+    if sentido == "Terminal Jabaquara - Terminal Diadema":
+        return "Linha 290 Terminal Jabaquara - Terminal Diadema"
+
+    return "Linha 290"
+
+
+def montar_parada(dados):
+    parada = obter_valor(
+        dados,
+        ["parada_atual", "parada"],
+        "Aguardando dados"
+    )
+
+    if not parada:
+        return "Aguardando dados"
+
+    return parada
+
+
+def montar_coordenadas(dados):
+    coordenadas = obter_valor(
+        dados,
+        ["coordenadas"],
+        None
+    )
+
+    if coordenadas:
+        return coordenadas
+
+    latitude = obter_valor(dados, ["latitude", "lat"], None)
+    longitude = obter_valor(dados, ["longitude", "lon", "lng"], None)
+
+    if latitude is None or longitude is None:
+        return "Aguardando dados"
+
+    try:
+        latitude = float(latitude)
+        longitude = float(longitude)
+
+        return f"Lat: {latitude:.6f}\nLon: {longitude:.6f}"
+
+    except Exception:
+        return f"{latitude}, {longitude}"
+
+
+def montar_data_hora(dados):
+    data_hora = obter_valor(
+        dados,
+        ["data_hora"],
+        None
+    )
+
+    if data_hora:
+        return data_hora
+
+    data = obter_valor(dados, ["data"], None)
+    hora = obter_valor(dados, ["hora"], None)
+
+    if data and hora:
+        return f"{data} {hora}"
+
+    return agora_sao_paulo().strftime("%d/%m/%Y %H:%M:%S")
+
+
+def montar_embarque(dados):
+    valor = obter_valor(
+        dados,
+        ["embarque", "embarques_total", "total_ciclo_final"],
+        0
+    )
+
+    try:
+        return str(int(valor))
+    except Exception:
+        return str(valor)
+
+
+def exibir_card(titulo, valor):
+    titulo = html.escape(str(titulo))
+    valor = html.escape(str(valor)).replace("\n", "<br>")
+
+    st.markdown(
+        f"""
+        <div class="card-next">
+            <div class="card-title-next">{titulo}</div>
+            <div class="card-value-next">{valor}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+# ============================================================
+# MQTT
+# ============================================================
+
+class EstadoMQTT:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.payload = {}
+        self.ultima_mensagem = "Aguardando dados"
+        self.erro = ""
+        self.conectado = False
+
+    def on_connect(self, client, userdata, flags, reason_code, properties):
+        codigo = codigo_reason_code(reason_code)
+
+        with self.lock:
+            self.conectado = codigo == 0
+
+            if codigo == 0:
+                self.erro = ""
+            else:
+                self.erro = f"Falha de conexão MQTT. Código: {reason_code}"
+
+        if codigo == 0:
+            client.subscribe(MQTT_TOPIC)
+
+    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+        codigo = codigo_reason_code(reason_code)
+
+        with self.lock:
+            self.conectado = False
+
+            if codigo != 0:
+                self.erro = f"MQTT desconectado inesperadamente. Código: {reason_code}"
+
+    def on_message(self, client, userdata, msg):
+        try:
+            texto = msg.payload.decode("utf-8")
+            dados = json.loads(texto)
+
+            with self.lock:
+                self.payload = dados
+                self.ultima_mensagem = agora_sao_paulo().strftime("%d/%m/%Y %H:%M:%S")
+                self.erro = ""
+
+        except Exception as erro:
+            with self.lock:
+                self.erro = f"Erro ao ler payload MQTT: {erro}"
+
+    def snapshot(self):
+        with self.lock:
+            return {
+                "payload": dict(self.payload),
+                "ultima_mensagem": self.ultima_mensagem,
+                "erro": self.erro,
+                "conectado": self.conectado
+            }
+
+
+@st.cache_resource
 def iniciar_mqtt():
-    try:
-        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-        client.on_connect = on_connect
-        client.on_message = on_message
-        client.connect(BROKER, PORTA, 60)
-        client.loop_start()
-        return client
-    except Exception as e:
-        print(f"Não foi possível conectar ao MQTT agora: {e}")
-        return None
+    estado = EstadoMQTT()
 
-mqtt_client = iniciar_mqtt()
-
-app.layout = html.Div(
-    style={
-        "fontFamily": "Arial",
-        "backgroundColor": "#f4f6f9",
-        "padding": "20px",
-        "minHeight": "100vh"
-    },
-    children=[
-        html.H1(
-            "Painel de Controle Next Mobilidade",
-            style={
-                "textAlign": "center",
-                "color": "#1f2d3d",
-                "marginBottom": "10px"
-            }
-        ),
-
-        html.P(
-            "Estrutura inicial preparada para receber dados do ônibus via MQTT",
-            style={
-                "textAlign": "center",
-                "fontSize": "18px",
-                "marginBottom": "30px"
-            }
-        ),
-
-        dcc.Interval(
-            id="atualizacao",
-            interval=1000,
-            n_intervals=0
-        ),
-
-        html.Div(
-            style={
-                "display": "grid",
-                "gridTemplateColumns": "repeat(3, 1fr)",
-                "gap": "15px",
-                "marginBottom": "30px"
-            },
-            children=[
-                html.Div(id="card_onibus", style=card_style()),
-                html.Div(id="card_parada_atual", style=card_style()),
-                html.Div(id="card_sentido", style=card_style()),
-                html.Div(id="card_trecho_real", style=card_style()),
-                html.Div(id="card_horario", style=card_style()),
-                html.Div(id="card_localizacao", style=card_style()),
-                html.Div(id="card_embarque", style=card_style()),
-                html.Div(id="card_desembarque", style=card_style()),
-                html.Div(id="card_pessoas", style=card_style())
-            ]
-        ),
-
-        html.Div(
-            style={**box_style(), "marginBottom": "20px"},
-            children=[
-                html.H3(
-                    "Tabela Operacional por Parada/Terminal",
-                    style={
-                        "marginTop": "0",
-                        "color": "#1f2d3d",
-                        "fontFamily": "Arial"
-                    }
-                ),
-                dash_table.DataTable(
-                    id="tabela_operacional",
-                    columns=[
-                        {"name": "Parada/Terminal", "id": "parada_terminal"},
-                        {"name": "Horário", "id": "horario"},
-                        {"name": "Embarque", "id": "embarque"},
-                        {"name": "Desembarque", "id": "desembarque"},
-                        {"name": "Pessoas no Ônibus", "id": "pessoas_no_onibus"}
-                    ],
-                    data=eventos_operacionais,
-                    style_table={"overflowX": "auto"},
-                    style_header={
-                        "backgroundColor": "#1f2d3d",
-                        "color": "white",
-                        "fontWeight": "bold",
-                        "textAlign": "center",
-                        "fontFamily": "Arial"
-                    },
-                    style_cell={
-                        "textAlign": "center",
-                        "padding": "12px",
-                        "fontFamily": "Arial",
-                        "fontSize": "15px",
-                        "whiteSpace": "normal",
-                        "height": "auto"
-                    },
-                    style_data={
-                        "backgroundColor": "white",
-                        "color": "#1f2d3d"
-                    },
-                    style_data_conditional=[
-                        {
-                            "if": {"row_index": "odd"},
-                            "backgroundColor": "#f7f9fc"
-                        }
-                    ]
-                )
-            ]
-        ),
-
-        html.Div(
-            style={**box_style(), "marginBottom": "20px"},
-            children=[
-                dcc.Graph(id="grafico_mapa")
-            ]
-        ),
-
-        html.Div(
-            style=box_style(),
-            children=[
-                dcc.Graph(id="grafico_resumo")
-            ]
-        )
-    ]
-)
-
-@app.callback(
-    Output("card_onibus", "children"),
-    Output("card_parada_atual", "children"),
-    Output("card_sentido", "children"),
-    Output("card_trecho_real", "children"),
-    Output("card_horario", "children"),
-    Output("card_localizacao", "children"),
-    Output("card_embarque", "children"),
-    Output("card_desembarque", "children"),
-    Output("card_pessoas", "children"),
-    Output("tabela_operacional", "data"),
-    Output("grafico_mapa", "figure"),
-    Output("grafico_resumo", "figure"),
-    Input("atualizacao", "n_intervals")
-)
-def atualizar_dashboard(n):
-    with dados_lock:
-        linha = dados_onibus["linha"]
-        situacao = dados_onibus["situacao"]
-        sentido = dados_onibus["sentido"]
-        trecho_real = dados_onibus["trecho_real"]
-        horario = dados_onibus["horario"]
-        embarque = dados_onibus["embarque"]
-        desembarque = dados_onibus["desembarque"]
-        pessoas = dados_onibus["pessoas_no_onibus"]
-        latitude = dados_onibus["latitude"]
-        longitude = dados_onibus["longitude"]
-
-    localizacao = f"Lat: {latitude} | Lon: {longitude}"
-    parada_atual = obter_parada_atual_por_estado(situacao, latitude, longitude)
-
-    return (
-        montar_card("Ônibus", f"Linha {linha}"),
-        montar_card("Parada Atual", parada_atual),
-        montar_card("Sentido", sentido),
-        montar_card("Trecho Real", trecho_real),
-        montar_card("Horário", horario),
-        montar_card("Localização", localizacao),
-        montar_card("Embarque", embarque),
-        montar_card("Desembarque", desembarque),
-        montar_card("Pessoas no Ônibus", pessoas),
-        [dict(linha) for linha in eventos_operacionais],
-        criar_mapa(),
-        criar_grafico_resumo()
+    client = mqtt.Client(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        client_id=f"dashboard_next_{int(time.time())}"
     )
 
-if __name__ == "__main__":
-    app.run(debug=False, host="0.0.0.0", port=8050, use_reloader=False)
+    client.username_pw_set(MQTT_USUARIO, MQTT_SENHA)
+    client.tls_set()
+
+    client.on_connect = estado.on_connect
+    client.on_disconnect = estado.on_disconnect
+    client.on_message = estado.on_message
+
+    client.connect_async(MQTT_BROKER, MQTT_PORT, 30)
+    client.loop_start()
+
+    return estado
+
+
+# ============================================================
+# INICIALIZAÇÃO MQTT
+# ============================================================
+
+estado_mqtt = iniciar_mqtt()
+snapshot = estado_mqtt.snapshot()
+payload = snapshot["payload"]
+
+
+# ============================================================
+# DADOS DOS CARDS
+# ============================================================
+
+subtitulo = montar_subtitulo(payload)
+parada_card = montar_parada(payload)
+coordenadas_card = montar_coordenadas(payload)
+data_hora_card = montar_data_hora(payload)
+embarque_card = montar_embarque(payload)
+
+
+# ============================================================
+# ESTILO VISUAL
+# ============================================================
+
+st.markdown(
+    """
+    <style>
+        .block-container {
+            padding-top: 1.5rem;
+            padding-bottom: 2rem;
+        }
+
+        .titulo-next {
+            font-size: 2.4rem;
+            font-weight: 700;
+            margin-bottom: 0.2rem;
+            color: #31333F;
+            text-align: center;
+        }
+
+        .subtitulo-next {
+            font-size: 1.15rem;
+            font-weight: 400;
+            margin-bottom: 1.8rem;
+            color: rgba(49, 51, 63, 0.78);
+            text-align: center;
+        }
+
+        .card-next {
+            border: 1px solid rgba(49, 51, 63, 0.16);
+            border-radius: 14px;
+            padding: 16px 18px;
+            height: 125px;
+            max-height: 125px;
+            margin-bottom: 14px;
+            background: rgba(255, 255, 255, 0.02);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+        }
+
+        .card-title-next {
+            font-size: 0.85rem;
+            opacity: 0.75;
+            margin-bottom: 7px;
+            line-height: 1.15;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .card-value-next {
+            font-size: clamp(1.05rem, 1.35vw, 1.45rem);
+            font-weight: 500;
+            line-height: 1.22;
+            word-break: break-word;
+            white-space: normal;
+        }
+
+        .status-next {
+            font-size: 0.80rem;
+            color: rgba(49, 51, 63, 0.62);
+            margin-top: 1.2rem;
+            text-align: center;
+        }
+
+        .erro-next {
+            font-size: 0.90rem;
+            color: #b00020;
+            margin-top: 1rem;
+            text-align: center;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# ============================================================
+# INTERFACE
+# ============================================================
+
+st.markdown(
+    '<div class="titulo-next">Painel Next Mobilidade</div>',
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    f'<div class="subtitulo-next">{html.escape(str(subtitulo))}</div>',
+    unsafe_allow_html=True
+)
+
+col1, col2 = st.columns(2)
+
+with col1:
+    exibir_card("Parada", parada_card)
+
+with col2:
+    exibir_card("Coordenadas", coordenadas_card)
+
+col3, col4 = st.columns(2)
+
+with col3:
+    exibir_card("Data e hora", data_hora_card)
+
+with col4:
+    exibir_card("Embarque", embarque_card)
+
+
+# ============================================================
+# STATUS TÉCNICO DISCRETO
+# ============================================================
+
+if snapshot["erro"]:
+    st.markdown(
+        f'<div class="erro-next">{html.escape(snapshot["erro"])}</div>',
+        unsafe_allow_html=True
+    )
+else:
+    status = "conectado" if snapshot["conectado"] else "conectando"
+    ultima = snapshot["ultima_mensagem"]
+
+    st.markdown(
+        f'<div class="status-next">MQTT: {status} | Última mensagem: {html.escape(str(ultima))}</div>',
+        unsafe_allow_html=True
+    )
+
+
+# ============================================================
+# ATUALIZAÇÃO AUTOMÁTICA
+# ============================================================
+
+time.sleep(INTERVALO_ATUALIZACAO)
+st.rerun()
