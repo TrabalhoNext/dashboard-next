@@ -2,27 +2,15 @@ import json
 import time
 import html
 import threading
+from datetime import datetime, timedelta
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 
 import streamlit as st
 import paho.mqtt.client as mqtt
-
-
-# ============================================================
-# DASHBOARD NEXT MOBILIDADE
-#
-# Interface simples:
-# - Parada
-# - Data e Hora
-# - Latitude / Longitude
-# - Velocidade
-# - Embarque
-# - Desembarque
-# - Lotação Atual
-#
-# O dashboard lê dois tópicos MQTT:
-# - GPS: next/linha290/gps
-# - Contagem: next/linha290/contagem
-# ============================================================
 
 
 # ============================================================
@@ -36,14 +24,9 @@ st.set_page_config(
 
 MQTT_BROKER = st.secrets["mqtt"]["broker"]
 MQTT_PORT = int(st.secrets["mqtt"]["porta"])
+MQTT_TOPIC = st.secrets["mqtt"]["topico"]
 MQTT_USUARIO = st.secrets["mqtt"]["usuario"]
 MQTT_SENHA = st.secrets["mqtt"]["senha"]
-
-# Tópico atual do GPS, já configurado no Streamlit Secrets
-MQTT_TOPIC_GPS = st.secrets["mqtt"]["topico"]
-
-# Novo tópico da detecção de pessoas
-MQTT_TOPIC_CONTAGEM = "next/linha290/contagem"
 
 INTERVALO_ATUALIZACAO = 1
 
@@ -52,7 +35,7 @@ INTERVALO_ATUALIZACAO = 1
 # FUNÇÕES AUXILIARES
 # ============================================================
 
-def obter_valor(dados, chaves, padrao="Aguardando dados"):
+def obter_valor(dados, chaves, padrao=None):
     for chave in chaves:
         valor = dados.get(chave)
         if valor is not None and valor != "":
@@ -60,31 +43,11 @@ def obter_valor(dados, chaves, padrao="Aguardando dados"):
     return padrao
 
 
-def converter_float(valor):
-    if valor is None or valor == "":
-        return None
+def agora_sao_paulo():
+    if ZoneInfo is not None:
+        return datetime.now(ZoneInfo("America/Sao_Paulo"))
 
-    try:
-        if isinstance(valor, str):
-            valor = (
-                valor.replace("km/h", "")
-                .replace("km", "")
-                .replace(",", ".")
-                .strip()
-            )
-        return float(valor)
-    except Exception:
-        return None
-
-
-def converter_inteiro(valor, padrao="Aguardando dados"):
-    if valor is None or valor == "":
-        return padrao
-
-    try:
-        return int(float(valor))
-    except Exception:
-        return padrao
+    return datetime.utcnow() - timedelta(hours=3)
 
 
 def codigo_reason_code(reason_code):
@@ -99,10 +62,105 @@ def codigo_reason_code(reason_code):
         return -1
 
 
+def montar_subtitulo(dados):
+    subtitulo = obter_valor(
+        dados,
+        ["subtitulo_linha"],
+        None
+    )
+
+    if subtitulo:
+        return subtitulo
+
+    sentido = obter_valor(
+        dados,
+        ["sentido"],
+        ""
+    )
+
+    if sentido == "Terminal Diadema - Terminal Jabaquara":
+        return "Linha 290 Terminal Diadema - Terminal Jabaquara"
+
+    if sentido == "Terminal Jabaquara - Terminal Diadema":
+        return "Linha 290 Terminal Jabaquara - Terminal Diadema"
+
+    return "Linha 290"
+
+
+def montar_parada(dados):
+    parada = obter_valor(
+        dados,
+        ["parada_atual", "parada"],
+        "Aguardando dados"
+    )
+
+    if not parada:
+        return "Aguardando dados"
+
+    return parada
+
+
+def montar_coordenadas(dados):
+    coordenadas = obter_valor(
+        dados,
+        ["coordenadas"],
+        None
+    )
+
+    if coordenadas:
+        return coordenadas
+
+    latitude = obter_valor(dados, ["latitude", "lat"], None)
+    longitude = obter_valor(dados, ["longitude", "lon", "lng"], None)
+
+    if latitude is None or longitude is None:
+        return "Aguardando dados"
+
+    try:
+        latitude = float(latitude)
+        longitude = float(longitude)
+
+        return f"Lat: {latitude:.6f}\nLon: {longitude:.6f}"
+
+    except Exception:
+        return f"{latitude}, {longitude}"
+
+
+def montar_data_hora(dados):
+    data_hora = obter_valor(
+        dados,
+        ["data_hora"],
+        None
+    )
+
+    if data_hora:
+        return data_hora
+
+    data = obter_valor(dados, ["data"], None)
+    hora = obter_valor(dados, ["hora"], None)
+
+    if data and hora:
+        return f"{data} {hora}"
+
+    return agora_sao_paulo().strftime("%d/%m/%Y %H:%M:%S")
+
+
+def montar_embarque(dados):
+    valor = obter_valor(
+        dados,
+        ["embarque", "embarques_total", "total_ciclo_final"],
+        0
+    )
+
+    try:
+        return str(int(valor))
+    except Exception:
+        return str(valor)
+
+
 def exibir_card(titulo, valor):
     titulo = html.escape(str(titulo))
-    valor = html.escape(str(valor))
-    valor = valor.replace("\n", "<br>")
+    valor = html.escape(str(valor)).replace("\n", "<br>")
 
     st.markdown(
         f"""
@@ -116,31 +174,39 @@ def exibir_card(titulo, valor):
 
 
 # ============================================================
-# CLASSE MQTT
+# MQTT
 # ============================================================
 
 class EstadoMQTT:
     def __init__(self):
         self.lock = threading.Lock()
-        self.payload_gps = {}
-        self.payload_contagem = {}
-        self.conectado = False
+        self.payload = {}
+        self.ultima_mensagem = "Aguardando dados"
         self.erro = ""
+        self.conectado = False
 
-    def on_connect(self, client, userdata, flags, reason_code, properties=None):
+    def on_connect(self, client, userdata, flags, reason_code, properties):
         codigo = codigo_reason_code(reason_code)
 
         with self.lock:
             self.conectado = codigo == 0
-            self.erro = "" if codigo == 0 else f"Falha MQTT. Código: {reason_code}"
+
+            if codigo == 0:
+                self.erro = ""
+            else:
+                self.erro = f"Falha de conexão MQTT. Código: {reason_code}"
 
         if codigo == 0:
-            client.subscribe(MQTT_TOPIC_GPS)
-            client.subscribe(MQTT_TOPIC_CONTAGEM)
+            client.subscribe(MQTT_TOPIC)
 
-    def on_disconnect(self, client, userdata, *args):
+    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+        codigo = codigo_reason_code(reason_code)
+
         with self.lock:
             self.conectado = False
+
+            if codigo != 0:
+                self.erro = f"MQTT desconectado inesperadamente. Código: {reason_code}"
 
     def on_message(self, client, userdata, msg):
         try:
@@ -148,25 +214,21 @@ class EstadoMQTT:
             dados = json.loads(texto)
 
             with self.lock:
-                if msg.topic == MQTT_TOPIC_GPS:
-                    self.payload_gps = dados
-
-                elif msg.topic == MQTT_TOPIC_CONTAGEM:
-                    self.payload_contagem = dados
-
+                self.payload = dados
+                self.ultima_mensagem = agora_sao_paulo().strftime("%d/%m/%Y %H:%M:%S")
                 self.erro = ""
 
         except Exception as erro:
             with self.lock:
-                self.erro = str(erro)
+                self.erro = f"Erro ao ler payload MQTT: {erro}"
 
     def snapshot(self):
         with self.lock:
             return {
-                "payload_gps": dict(self.payload_gps),
-                "payload_contagem": dict(self.payload_contagem),
-                "conectado": self.conectado,
-                "erro": self.erro
+                "payload": dict(self.payload),
+                "ultima_mensagem": self.ultima_mensagem,
+                "erro": self.erro,
+                "conectado": self.conectado
             }
 
 
@@ -174,15 +236,10 @@ class EstadoMQTT:
 def iniciar_mqtt():
     estado = EstadoMQTT()
 
-    try:
-        client = mqtt.Client(
-            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-            client_id=f"dashboard_next_{int(time.time())}"
-        )
-    except Exception:
-        client = mqtt.Client(
-            client_id=f"dashboard_next_{int(time.time())}"
-        )
+    client = mqtt.Client(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        client_id=f"dashboard_next_{int(time.time())}"
+    )
 
     client.username_pw_set(MQTT_USUARIO, MQTT_SENHA)
     client.tls_set()
@@ -203,83 +260,18 @@ def iniciar_mqtt():
 
 estado_mqtt = iniciar_mqtt()
 snapshot = estado_mqtt.snapshot()
-
-payload_gps = snapshot["payload_gps"]
-payload_contagem = snapshot["payload_contagem"]
+payload = snapshot["payload"]
 
 
 # ============================================================
-# LEITURA DOS DADOS DO GPS
-# Tópico: next/linha290/gps
+# DADOS DOS CARDS
 # ============================================================
 
-parada_card = obter_valor(
-    payload_gps,
-    ["parada_atual", "parada"],
-    "Aguardando dados"
-)
-
-data = obter_valor(
-    payload_gps,
-    ["data"],
-    ""
-)
-
-hora = obter_valor(
-    payload_gps,
-    ["hora"],
-    ""
-)
-
-latitude = converter_float(
-    obter_valor(payload_gps, ["latitude", "lat"], None)
-)
-
-longitude = converter_float(
-    obter_valor(payload_gps, ["longitude", "lon", "lng"], None)
-)
-
-velocidade_float = converter_float(
-    obter_valor(payload_gps, ["velocidade", "speed", "velocidade_kmh"], None)
-)
-
-
-# ============================================================
-# LEITURA DOS DADOS DA DETECÇÃO
-# Tópico: next/linha290/contagem
-# ============================================================
-
-embarque_card = converter_inteiro(
-    obter_valor(payload_contagem, ["embarque"], None)
-)
-
-desembarque_card = converter_inteiro(
-    obter_valor(payload_contagem, ["desembarque"], None)
-)
-
-lotacao_card = converter_inteiro(
-    obter_valor(payload_contagem, ["lotacao_atual"], None)
-)
-
-
-# ============================================================
-# FORMATAÇÃO DOS CARDS DO GPS
-# ============================================================
-
-if data != "" and hora != "":
-    data_hora_card = f"{data} {hora}"
-else:
-    data_hora_card = "Aguardando dados"
-
-if latitude is not None and longitude is not None:
-    latitude_longitude_card = f"Lat: {latitude:.6f}\nLon: {longitude:.6f}"
-else:
-    latitude_longitude_card = "Aguardando dados"
-
-if velocidade_float is not None:
-    velocidade_card = f"{int(round(velocidade_float))} km/h"
-else:
-    velocidade_card = "Aguardando dados"
+subtitulo = montar_subtitulo(payload)
+parada_card = montar_parada(payload)
+coordenadas_card = montar_coordenadas(payload)
+data_hora_card = montar_data_hora(payload)
+embarque_card = montar_embarque(payload)
 
 
 # ============================================================
@@ -289,32 +281,34 @@ else:
 st.markdown(
     """
     <style>
-        .stApp {
-            background-color: #ffffff;
-        }
-
         .block-container {
-            padding-top: 4.5rem;
+            padding-top: 1.5rem;
             padding-bottom: 2rem;
-            max-width: 1500px;
         }
 
         .titulo-next {
             font-size: 2.4rem;
             font-weight: 700;
-            margin: 0 0 1.8rem 0;
+            margin-bottom: 0.2rem;
             color: #31333F;
-            line-height: 1.35;
-            overflow: visible;
+            text-align: center;
+        }
+
+        .subtitulo-next {
+            font-size: 1.15rem;
+            font-weight: 400;
+            margin-bottom: 1.8rem;
+            color: rgba(49, 51, 63, 0.78);
+            text-align: center;
         }
 
         .card-next {
             border: 1px solid rgba(49, 51, 63, 0.16);
             border-radius: 14px;
             padding: 16px 18px;
-            height: 120px;
-            max-height: 120px;
-            margin-bottom: 18px;
+            height: 125px;
+            max-height: 125px;
+            margin-bottom: 14px;
             background: rgba(255, 255, 255, 0.02);
             overflow: hidden;
             display: flex;
@@ -325,7 +319,7 @@ st.markdown(
         .card-title-next {
             font-size: 0.85rem;
             opacity: 0.75;
-            margin-bottom: 8px;
+            margin-bottom: 7px;
             line-height: 1.15;
             white-space: nowrap;
             overflow: hidden;
@@ -335,10 +329,23 @@ st.markdown(
         .card-value-next {
             font-size: clamp(1.05rem, 1.35vw, 1.45rem);
             font-weight: 500;
-            line-height: 1.28;
+            line-height: 1.22;
             word-break: break-word;
             white-space: normal;
-            color: #262730;
+        }
+
+        .status-next {
+            font-size: 0.80rem;
+            color: rgba(49, 51, 63, 0.62);
+            margin-top: 1.2rem;
+            text-align: center;
+        }
+
+        .erro-next {
+            font-size: 0.90rem;
+            color: #b00020;
+            margin-top: 1rem;
+            text-align: center;
         }
     </style>
     """,
@@ -348,11 +355,15 @@ st.markdown(
 
 # ============================================================
 # INTERFACE
-# 7 CARDS
 # ============================================================
 
 st.markdown(
     '<div class="titulo-next">Painel Next Mobilidade</div>',
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    f'<div class="subtitulo-next">{html.escape(str(subtitulo))}</div>',
     unsafe_allow_html=True
 )
 
@@ -362,26 +373,34 @@ with col1:
     exibir_card("Parada", parada_card)
 
 with col2:
-    exibir_card("Data e Hora", data_hora_card)
+    exibir_card("Coordenadas", coordenadas_card)
 
 col3, col4 = st.columns(2)
 
 with col3:
-    exibir_card("Latitude / Longitude", latitude_longitude_card)
+    exibir_card("Data e hora", data_hora_card)
 
 with col4:
-    exibir_card("Velocidade", velocidade_card)
-
-col5, col6, col7 = st.columns(3)
-
-with col5:
     exibir_card("Embarque", embarque_card)
 
-with col6:
-    exibir_card("Desembarque", desembarque_card)
 
-with col7:
-    exibir_card("Lotação Atual", lotacao_card)
+# ============================================================
+# STATUS TÉCNICO DISCRETO
+# ============================================================
+
+if snapshot["erro"]:
+    st.markdown(
+        f'<div class="erro-next">{html.escape(snapshot["erro"])}</div>',
+        unsafe_allow_html=True
+    )
+else:
+    status = "conectado" if snapshot["conectado"] else "conectando"
+    ultima = snapshot["ultima_mensagem"]
+
+    st.markdown(
+        f'<div class="status-next">MQTT: {status} | Última mensagem: {html.escape(str(ultima))}</div>',
+        unsafe_allow_html=True
+    )
 
 
 # ============================================================
