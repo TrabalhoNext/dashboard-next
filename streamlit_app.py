@@ -128,6 +128,29 @@ def montar_data_hora(dados):
     return f"Data: {agora.strftime('%d/%m/%Y')}\nHora: {agora.strftime('%H:%M:%S')}"
 
 
+def montar_velocidade(dados):
+    velocidade = obter_valor(
+        dados,
+        ["velocidade", "velocidade_numero", "speed", "velocidade_kmh"],
+        None
+    )
+
+    if velocidade is None:
+        return "Aguardando dados"
+
+    try:
+        if isinstance(velocidade, str):
+            if "km/h" in velocidade:
+                return velocidade
+
+            velocidade = velocidade.replace(",", ".").strip()
+
+        return f"{int(round(float(velocidade)))} km/h"
+
+    except Exception:
+        return str(velocidade)
+
+
 def montar_embarque(dados):
     valor = obter_valor(
         dados,
@@ -260,6 +283,7 @@ subtitulo = montar_subtitulo(payload)
 parada_card = montar_parada(payload)
 coordenadas_card = montar_coordenadas(payload)
 data_hora_card = montar_data_hora(payload)
+velocidade_card = montar_velocidade(payload)
 embarque_card = montar_embarque(payload)
 lotacao_card = montar_lotacao(payload)
 
@@ -375,11 +399,14 @@ with col3:
     exibir_card("Data e hora", data_hora_card)
 
 with col4:
-    exibir_card("Embarque", embarque_card)
+    exibir_card("Velocidade", velocidade_card)
 
-col5 = st.columns(1)[0]
+col5, col6 = st.columns(2)
 
 with col5:
+    exibir_card("Embarque", embarque_card)
+
+with col6:
     exibir_card("Lotação Atual", lotacao_card)
 
 
