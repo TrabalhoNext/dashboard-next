@@ -316,17 +316,19 @@ st.markdown(
         }
 
         .card-title-next {
-            font-size: 0.9rem;
-            opacity: 0.78;
-            margin-bottom: 9px;
-            line-height: 1.15;
+            font-size: 1.08rem;
+            font-weight: 700;
+            opacity: 0.95;
+            margin-bottom: 10px;
+            line-height: 1.2;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            color: #31333F;
         }
 
         .card-value-next {
-            font-size: clamp(1.12rem, 1.45vw, 1.6rem);
+            font-size: clamp(1.18rem, 1.55vw, 1.72rem);
             font-weight: 500;
             line-height: 1.38;
             word-break: break-word;
