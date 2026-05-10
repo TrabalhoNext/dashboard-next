@@ -141,6 +141,19 @@ def montar_embarque(dados):
         return str(valor)
 
 
+def montar_lotacao(dados):
+    valor = obter_valor(
+        dados,
+        ["lotacao_atual", "lotacao", "ocupacao"],
+        "Aguardando dados"
+    )
+
+    try:
+        return str(int(valor))
+    except Exception:
+        return str(valor)
+
+
 def exibir_card(titulo, valor):
     titulo = html.escape(str(titulo))
     valor = html.escape(str(valor)).replace("\n", "<br>")
@@ -248,6 +261,7 @@ parada_card = montar_parada(payload)
 coordenadas_card = montar_coordenadas(payload)
 data_hora_card = montar_data_hora(payload)
 embarque_card = montar_embarque(payload)
+lotacao_card = montar_lotacao(payload)
 
 
 # ============================================================
@@ -258,19 +272,20 @@ st.markdown(
     """
     <style>
         .block-container {
-            padding-top: 1.3rem;
+            padding-top: 3.2rem;
             padding-bottom: 2rem;
             max-width: 1500px;
         }
 
         .titulo-next {
             width: 100%;
-            font-size: clamp(2rem, 3vw, 3rem);
+            font-size: clamp(1.85rem, 2.6vw, 2.65rem);
             font-weight: 700;
-            margin-bottom: 0.25rem;
+            margin-top: 0.5rem;
+            margin-bottom: 0.35rem;
             color: #31333F;
             text-align: center;
-            line-height: 1.15;
+            line-height: 1.25;
             white-space: normal;
             overflow: visible;
         }
@@ -279,16 +294,16 @@ st.markdown(
             width: 100%;
             font-size: clamp(1rem, 1.4vw, 1.35rem);
             font-weight: 400;
-            margin-bottom: 1.8rem;
+            margin-bottom: 2rem;
             color: rgba(49, 51, 63, 0.78);
             text-align: center;
-            line-height: 1.3;
+            line-height: 1.35;
             white-space: normal;
             overflow: visible;
         }
 
         .card-next {
-            border: 2.2px solid rgba(49, 51, 63, 0.32);
+            border: 3px solid rgba(49, 51, 63, 0.38);
             border-radius: 15px;
             padding: 18px 20px;
             min-height: 135px;
@@ -313,7 +328,7 @@ st.markdown(
         .card-value-next {
             font-size: clamp(1.12rem, 1.45vw, 1.6rem);
             font-weight: 500;
-            line-height: 1.35;
+            line-height: 1.38;
             word-break: break-word;
             white-space: normal;
         }
@@ -359,6 +374,11 @@ with col3:
 
 with col4:
     exibir_card("Embarque", embarque_card)
+
+col5 = st.columns(1)[0]
+
+with col5:
+    exibir_card("Lotação Atual", lotacao_card)
 
 
 # ============================================================
