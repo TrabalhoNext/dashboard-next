@@ -1,186 +1,229 @@
 import json
 import time
 import html
+import ssl
 import threading
 from datetime import datetime, timedelta
- 
+
 try:
     from zoneinfo import ZoneInfo
 except Exception:
     ZoneInfo = None
- 
+
 import streamlit as st
 import paho.mqtt.client as mqtt
- 
- 
+
+
 # ============================================================
 # CONFIGURACOES GERAIS
 # ============================================================
- 
+
 st.set_page_config(
     page_title="Painel Next Mobilidade",
     layout="wide"
 )
- 
-MQTT_BROKER = st.secrets["mqtt"]["broker"]
-MQTT_PORT = int(st.secrets["mqtt"]["porta"])
-MQTT_TOPIC = st.secrets["mqtt"]["topico"]
-MQTT_USUARIO = st.secrets["mqtt"]["usuario"]
-MQTT_SENHA = st.secrets["mqtt"]["senha"]
- 
+
+
+# ============================================================
+# LEITURA SEGURA DOS SECRETS DO STREAMLIT
+# ============================================================
+
+def ler_secret_mqtt(nome, padrao=None):
+    """
+    Lê os dados MQTT do secrets.toml no formato:
+
+    [mqtt]
+    broker = ""
+    porta = 8883
+    usuario = ""
+    senha = ""
+    topico = ""
+
+    Também aceita nomes maiúsculos como alternativa.
+    """
+
+    try:
+        if "mqtt" in st.secrets and nome in st.secrets["mqtt"]:
+            return st.secrets["mqtt"][nome]
+    except Exception:
+        pass
+
+    alternativas = {
+        "broker": ["MQTT_BROKER", "broker"],
+        "porta": ["MQTT_PORT", "porta"],
+        "usuario": ["MQTT_USERNAME", "MQTT_USUARIO", "usuario"],
+        "senha": ["MQTT_PASSWORD", "MQTT_SENHA", "senha"],
+        "topico": ["MQTT_TOPIC", "topico"],
+    }
+
+    for chave in alternativas.get(nome, []):
+        try:
+            return st.secrets[chave]
+        except Exception:
+            pass
+
+    return padrao
+
+
+MQTT_BROKER = str(ler_secret_mqtt("broker", "")).strip()
+MQTT_PORT = int(ler_secret_mqtt("porta", 8883))
+MQTT_TOPIC = str(ler_secret_mqtt("topico", "next/linha290/gps")).strip()
+MQTT_USUARIO = str(ler_secret_mqtt("usuario", "")).strip()
+MQTT_SENHA = str(ler_secret_mqtt("senha", "")).strip()
+
 INTERVALO_ATUALIZACAO = 1
- 
- 
+
+
 # ============================================================
 # FUNCOES AUXILIARES
 # ============================================================
- 
+
 def obter_valor(dados, chaves, padrao=None):
     for chave in chaves:
         valor = dados.get(chave)
         if valor is not None and valor != "":
             return valor
     return padrao
- 
- 
+
+
 def agora_sao_paulo():
     if ZoneInfo is not None:
         return datetime.now(ZoneInfo("America/Sao_Paulo"))
- 
+
     return datetime.utcnow() - timedelta(hours=3)
- 
- 
+
+
 def codigo_reason_code(reason_code):
     try:
         return int(reason_code)
     except Exception:
         texto = str(reason_code).lower()
- 
+
         if "success" in texto or texto == "0":
             return 0
- 
+
         return -1
- 
- 
+
+
 def montar_subtitulo(dados):
     subtitulo = obter_valor(dados, ["subtitulo_linha"], None)
- 
+
     if subtitulo:
         return subtitulo
- 
+
     sentido = obter_valor(dados, ["sentido"], "")
- 
+
     if sentido == "Terminal Diadema - Terminal Jabaquara":
         return "Linha 290 Terminal Diadema - Terminal Jabaquara"
- 
+
     if sentido == "Terminal Jabaquara - Terminal Diadema":
         return "Linha 290 Terminal Jabaquara - Terminal Diadema"
- 
+
     return "Linha 290 - Aguardando sentido"
- 
- 
+
+
 def montar_parada(dados):
     parada = obter_valor(
         dados,
         ["parada_atual", "parada"],
         "Aguardando dados"
     )
- 
+
     if not parada:
         return "Aguardando dados"
- 
+
     return parada
- 
- 
+
+
 def montar_coordenadas(dados):
     latitude = obter_valor(dados, ["latitude", "lat"], None)
     longitude = obter_valor(dados, ["longitude", "lon", "lng"], None)
- 
+
     if latitude is None or longitude is None:
         return "Aguardando dados"
- 
+
     try:
         latitude = float(latitude)
         longitude = float(longitude)
- 
+
         return f"Latitude: {latitude:.6f}\nLongitude: {longitude:.6f}"
- 
+
     except Exception:
         return f"Latitude: {latitude}\nLongitude: {longitude}"
- 
- 
+
+
 def montar_data_hora(dados):
     data = obter_valor(dados, ["data"], None)
     hora = obter_valor(dados, ["hora"], None)
- 
+
     if data and hora:
         return f"Data: {data}\nHora: {hora}"
- 
+
     data_hora = obter_valor(dados, ["data_hora"], None)
- 
+
     if data_hora:
         partes = str(data_hora).split(" ")
         if len(partes) >= 2:
             return f"Data: {partes[0]}\nHora: {partes[1]}"
         return str(data_hora)
- 
+
     agora = agora_sao_paulo()
     return f"Data: {agora.strftime('%d/%m/%Y')}\nHora: {agora.strftime('%H:%M:%S')}"
- 
- 
+
+
 def montar_velocidade(dados):
     velocidade = obter_valor(
         dados,
         ["velocidade", "velocidade_numero", "speed", "velocidade_kmh"],
         None
     )
- 
+
     if velocidade is None:
         return "Aguardando dados"
- 
+
     try:
         if isinstance(velocidade, str):
             if "km/h" in velocidade:
                 return velocidade
- 
+
             velocidade = velocidade.replace(",", ".").strip()
- 
+
         return f"{int(round(float(velocidade)))} km/h"
- 
+
     except Exception:
         return str(velocidade)
- 
- 
+
+
 def montar_embarque(dados):
     valor = obter_valor(
         dados,
         ["embarque", "embarque_parada"],
         0
     )
- 
+
     try:
         return str(int(valor))
     except Exception:
         return str(valor)
- 
- 
+
+
 def montar_lotacao(dados):
     valor = obter_valor(
         dados,
         ["lotacao_atual", "lotacao", "ocupacao"],
         "Aguardando dados"
     )
- 
+
     try:
         return str(int(valor))
     except Exception:
         return str(valor)
- 
- 
+
+
 def exibir_card(titulo, valor):
     titulo = html.escape(str(titulo))
     valor = html.escape(str(valor)).replace("\n", "<br>")
- 
+
     st.markdown(
         f"""
         <div class="card-next">
@@ -190,95 +233,129 @@ def exibir_card(titulo, valor):
         """,
         unsafe_allow_html=True
     )
- 
- 
+
+
 # ============================================================
 # MQTT
 # ============================================================
- 
+
 class EstadoMQTT:
     def __init__(self):
         self.lock = threading.Lock()
         self.payload = {}
         self.erro = ""
         self.conectado = False
- 
-    def on_connect(self, client, userdata, flags, reason_code, properties):
+        self.ultima_mensagem = ""
+        self.client = None
+
+    def on_connect(self, client, userdata, flags, reason_code=None, properties=None):
         codigo = codigo_reason_code(reason_code)
- 
+
         with self.lock:
             self.conectado = codigo == 0
             self.erro = "" if codigo == 0 else f"Falha de conexao MQTT. Codigo: {reason_code}"
- 
+
         if codigo == 0:
             client.subscribe(MQTT_TOPIC)
- 
-    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+
+    def on_disconnect(self, client, userdata, *args):
+        reason_code = 0
+
+        if len(args) == 1:
+            reason_code = args[0]
+        elif len(args) >= 2:
+            reason_code = args[1]
+
         codigo = codigo_reason_code(reason_code)
- 
+
         with self.lock:
             self.conectado = False
- 
+
             if codigo != 0:
                 self.erro = f"MQTT desconectado inesperadamente. Codigo: {reason_code}"
- 
+
     def on_message(self, client, userdata, msg):
         try:
             texto = msg.payload.decode("utf-8")
             dados = json.loads(texto)
- 
+
             with self.lock:
                 self.payload = dados
                 self.erro = ""
- 
+                self.ultima_mensagem = agora_sao_paulo().strftime("%d/%m/%Y %H:%M:%S")
+
         except Exception as erro:
             with self.lock:
                 self.erro = f"Erro ao ler payload MQTT: {erro}"
- 
+
     def snapshot(self):
         with self.lock:
             return {
                 "payload": dict(self.payload),
                 "erro": self.erro,
-                "conectado": self.conectado
+                "conectado": self.conectado,
+                "ultima_mensagem": self.ultima_mensagem,
             }
- 
- 
+
+
 @st.cache_resource
 def iniciar_mqtt():
     estado = EstadoMQTT()
- 
-    client = mqtt.Client(
-        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-        client_id=f"dashboard_next_{int(time.time())}"
-    )
- 
-    client.username_pw_set(MQTT_USUARIO, MQTT_SENHA)
-    client.tls_set()
- 
-    client.on_connect = estado.on_connect
-    client.on_disconnect = estado.on_disconnect
-    client.on_message = estado.on_message
- 
-    client.connect_async(MQTT_BROKER, MQTT_PORT, 30)
-    client.loop_start()
- 
+
+    if not MQTT_BROKER:
+        estado.erro = "Broker MQTT nao configurado no secrets.toml."
+        return estado
+
+    if not MQTT_USUARIO or not MQTT_SENHA:
+        estado.erro = "Usuario ou senha MQTT nao configurados no secrets.toml."
+        return estado
+
+    try:
+        try:
+            client = mqtt.Client(
+                callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+                client_id=f"dashboard_next_{int(time.time())}"
+            )
+        except Exception:
+            client = mqtt.Client(
+                client_id=f"dashboard_next_{int(time.time())}"
+            )
+
+        client.username_pw_set(MQTT_USUARIO, MQTT_SENHA)
+        client.tls_set(tls_version=ssl.PROTOCOL_TLS_CLIENT)
+
+        client.on_connect = estado.on_connect
+        client.on_disconnect = estado.on_disconnect
+        client.on_message = estado.on_message
+
+        client.reconnect_delay_set(min_delay=1, max_delay=30)
+
+        client.connect_async(MQTT_BROKER, MQTT_PORT, 30)
+        client.loop_start()
+
+        # Mantém o client vivo dentro do estado.
+        # Isso evita perda da conexão MQTT durante os reruns do Streamlit.
+        estado.client = client
+
+    except Exception as erro:
+        estado.erro = f"Erro ao iniciar MQTT no dashboard: {erro}"
+
     return estado
- 
- 
+
+
 # ============================================================
 # INICIALIZACAO MQTT
 # ============================================================
- 
+
 estado_mqtt = iniciar_mqtt()
 snapshot = estado_mqtt.snapshot()
 payload = snapshot["payload"]
- 
- 
+
+
 # ============================================================
 # DADOS DOS CARDS
 # ============================================================
- 
+
 subtitulo = montar_subtitulo(payload)
 parada_card = montar_parada(payload)
 coordenadas_card = montar_coordenadas(payload)
@@ -286,12 +363,12 @@ data_hora_card = montar_data_hora(payload)
 velocidade_card = montar_velocidade(payload)
 embarque_card = montar_embarque(payload)
 lotacao_card = montar_lotacao(payload)
- 
- 
+
+
 # ============================================================
 # ESTILO VISUAL
 # ============================================================
- 
+
 st.markdown(
     """
     <style>
@@ -300,7 +377,7 @@ st.markdown(
             padding-bottom: 2rem;
             max-width: 1500px;
         }
- 
+
         .titulo-next {
             width: 100%;
             font-size: clamp(1.85rem, 2.6vw, 2.65rem);
@@ -313,7 +390,7 @@ st.markdown(
             white-space: normal;
             overflow: visible;
         }
- 
+
         .subtitulo-next {
             width: 100%;
             font-size: clamp(1rem, 1.4vw, 1.35rem);
@@ -325,7 +402,7 @@ st.markdown(
             white-space: normal;
             overflow: visible;
         }
- 
+
         .card-next {
             border: 3px solid rgba(49, 51, 63, 0.38);
             border-radius: 15px;
@@ -338,7 +415,7 @@ st.markdown(
             flex-direction: column;
             justify-content: flex-start;
         }
- 
+
         .card-title-next {
             font-size: 1.08rem;
             font-weight: 700;
@@ -350,7 +427,7 @@ st.markdown(
             text-overflow: ellipsis;
             color: #31333F;
         }
- 
+
         .card-value-next {
             font-size: clamp(1.18rem, 1.55vw, 1.72rem);
             font-weight: 500;
@@ -358,7 +435,7 @@ st.markdown(
             word-break: break-word;
             white-space: normal;
         }
- 
+
         .erro-next {
             font-size: 0.90rem;
             color: #b00020;
@@ -369,62 +446,61 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
- 
- 
+
+
 # ============================================================
 # INTERFACE
 # ============================================================
- 
+
 st.markdown(
     '<div class="titulo-next">Painel Next Mobilidade</div>',
     unsafe_allow_html=True
 )
- 
+
 st.markdown(
     f'<div class="subtitulo-next">{html.escape(str(subtitulo))}</div>',
     unsafe_allow_html=True
 )
- 
+
 col1, col2 = st.columns(2)
- 
+
 with col1:
     exibir_card("Parada", parada_card)
- 
+
 with col2:
     exibir_card("Coordenadas", coordenadas_card)
- 
+
 col3, col4 = st.columns(2)
- 
+
 with col3:
     exibir_card("Data e hora", data_hora_card)
- 
+
 with col4:
     exibir_card("Velocidade", velocidade_card)
- 
+
 col5, col6 = st.columns(2)
- 
+
 with col5:
     exibir_card("Embarque", embarque_card)
- 
+
 with col6:
     exibir_card("Lotacao Atual", lotacao_card)
- 
- 
+
+
 # ============================================================
 # ERRO TECNICO SOMENTE SE OCORRER
 # ============================================================
- 
+
 if snapshot["erro"]:
     st.markdown(
         f'<div class="erro-next">{html.escape(snapshot["erro"])}</div>',
         unsafe_allow_html=True
     )
- 
- 
+
+
 # ============================================================
 # ATUALIZACAO AUTOMATICA
 # ============================================================
- 
+
 time.sleep(INTERVALO_ATUALIZACAO)
 st.rerun()
- 
