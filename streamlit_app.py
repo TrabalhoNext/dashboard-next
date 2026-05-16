@@ -169,89 +169,68 @@ def card(titulo, valor_card):
 st.title("Painel Next Mobilidade")
 
 if dados:
-    sentido = valor(dados, "sentido", "Linha 290")
+    subtitulo = valor(
+        dados,
+        "subtitulo_linha",
+        valor(dados, "sentido", "Linha 290 Terminal Diadema - Terminal Jabaquara")
+    )
 else:
-    sentido = "Aguardando dados da Linha 290"
+    subtitulo = "Linha 290 Terminal Diadema - Terminal Jabaquara"
 
-st.subheader(sentido)
-
-
-# =========================
-# STATUS MQTT
-# =========================
-
-col_status1, col_status2, col_status3 = st.columns(3)
-
-with col_status1:
-    if estado["conectado"]:
-        st.success("MQTT conectado")
-    else:
-        st.error("MQTT desconectado")
-
-with col_status2:
-    st.info(f"Tópico: {MQTT_TOPIC}")
-
-with col_status3:
-    st.info(f"Último recebimento: {estado['ultimo_recebimento'] or 'Aguardando'}")
-
-if estado["erro"]:
-    st.warning(estado["erro"])
+st.subheader(subtitulo)
 
 
 # =========================
-# CARDS PRINCIPAIS
+# DADOS PARA OS CARDS
 # =========================
 
 if dados:
-
     parada = valor(dados, "parada_atual", valor(dados, "parada", "Aguardando"))
     latitude = valor(dados, "latitude")
     longitude = valor(dados, "longitude")
     velocidade = valor(dados, "velocidade")
     data = valor(dados, "data")
     hora = valor(dados, "hora")
-    pessoas_detectadas = valor(dados, "pessoas_detectadas", 0)
     embarque = valor(dados, "embarque", 0)
     lotacao_atual = valor(dados, "lotacao_atual", 0)
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        card("Parada / Situação", parada)
-
-    with col2:
-        card("Coordenadas", f"{latitude}<br>{longitude}")
-
-    with col3:
-        card("Data e hora", f"{data}<br>{hora}")
-
-    with col4:
-        card("Velocidade", velocidade)
-
-    st.write("")
-
-    col5, col6, col7 = st.columns(3)
-
-    with col5:
-        card("Pessoas detectadas", pessoas_detectadas)
-
-    with col6:
-        card("Embarque", embarque)
-
-    with col7:
-        card("Lotação atual", lotacao_atual)
-
-    st.write("")
-
-    with st.expander("Ver último payload recebido pelo dashboard"):
-        st.code(estado["ultimo_payload_bruto"], language="json")
-
 else:
-    st.warning("Aguardando o primeiro dado enviado pelo Raspberry via MQTT...")
+    parada = "Aguardando dados"
+    latitude = "-"
+    longitude = "-"
+    velocidade = "-"
+    data = "-"
+    hora = "-"
+    embarque = 0
+    lotacao_atual = 0
 
-    with st.expander("Diagnóstico"):
-        st.write("Verifique se o tópico do Raspberry é igual ao tópico do dashboard.")
-        st.code(f"Tópico configurado no dashboard: {MQTT_TOPIC}")
+
+# =========================
+# CARDS PRINCIPAIS
+# =========================
+
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    card("Parada / Situação", parada)
+
+with col2:
+    card("Coordenadas", f"{latitude}<br>{longitude}")
+
+with col3:
+    card("Data e hora", f"{data}<br>{hora}")
+
+with col4:
+    card("Velocidade", velocidade)
+
+st.write("")
+
+col5, col6 = st.columns(2)
+
+with col5:
+    card("Embarque", embarque)
+
+with col6:
+    card("Lotação atual", lotacao_atual)
 
 
 # =========================
