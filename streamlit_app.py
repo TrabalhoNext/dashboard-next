@@ -1,3 +1,4 @@
+
 import json
 import time
 import html
@@ -202,8 +203,12 @@ class EstadoMQTT:
         self.payload = {}
         self.erro = ""
         self.conectado = False
+        self.qtd_mensagens = 0
+        self.ultimo_topico = ""
+        self.ultima_mensagem_texto = ""
+        self.ultimo_recebimento = ""
 
-    def on_connect(self, client, userdata, flags, reason_code, properties):
+    def on_connect(self, client, userdata, flags, reason_code, properties=None):
         codigo = codigo_reason_code(reason_code)
 
         with self.lock:
@@ -213,7 +218,7 @@ class EstadoMQTT:
         if codigo == 0:
             client.subscribe(MQTT_TOPIC)
 
-    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+    def on_disconnect(self, client, userdata, disconnect_flags=None, reason_code=None, properties=None):
         codigo = codigo_reason_code(reason_code)
 
         with self.lock:
@@ -230,6 +235,10 @@ class EstadoMQTT:
             with self.lock:
                 self.payload = dados
                 self.erro = ""
+                self.qtd_mensagens += 1
+                self.ultimo_topico = msg.topic
+                self.ultima_mensagem_texto = texto
+                self.ultimo_recebimento = agora_sao_paulo().strftime("%d/%m/%Y %H:%M:%S")
 
         except Exception as erro:
             with self.lock:
@@ -240,7 +249,11 @@ class EstadoMQTT:
             return {
                 "payload": dict(self.payload),
                 "erro": self.erro,
-                "conectado": self.conectado
+                "conectado": self.conectado,
+                "qtd_mensagens": self.qtd_mensagens,
+                "ultimo_topico": self.ultimo_topico,
+                "ultima_mensagem_texto": self.ultima_mensagem_texto,
+                "ultimo_recebimento": self.ultimo_recebimento
             }
 
 
@@ -248,10 +261,15 @@ class EstadoMQTT:
 def iniciar_mqtt():
     estado = EstadoMQTT()
 
-    client = mqtt.Client(
-        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-        client_id=f"dashboard_next_{int(time.time())}"
-    )
+    try:
+        client = mqtt.Client(
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+            client_id=f"dashboard_next_{int(time.time())}"
+        )
+    except Exception:
+        client = mqtt.Client(
+            client_id=f"dashboard_next_{int(time.time())}"
+        )
 
     client.username_pw_set(MQTT_USUARIO, MQTT_SENHA)
     client.tls_set()
@@ -260,6 +278,7 @@ def iniciar_mqtt():
     client.on_disconnect = estado.on_disconnect
     client.on_message = estado.on_message
 
+    client.reconnect_delay_set(min_delay=1, max_delay=30)
     client.connect_async(MQTT_BROKER, MQTT_PORT, 30)
     client.loop_start()
 
@@ -365,6 +384,15 @@ st.markdown(
             margin-top: 1rem;
             text-align: center;
         }
+
+        .debug-next {
+            border: 1px solid rgba(49, 51, 63, 0.25);
+            border-radius: 10px;
+            padding: 12px 14px;
+            margin-bottom: 18px;
+            font-size: 0.92rem;
+            background: rgba(49, 51, 63, 0.04);
+        }
     </style>
     """,
     unsafe_allow_html=True
@@ -384,6 +412,30 @@ st.markdown(
     f'<div class="subtitulo-next">{html.escape(str(subtitulo))}</div>',
     unsafe_allow_html=True
 )
+
+
+# ============================================================
+# DIAGNÓSTICO TEMPORÁRIO DO MQTT
+# ============================================================
+
+with st.expander("Diagnóstico MQTT", expanded=True):
+    st.write("Status MQTT:", "Conectado" if snapshot["conectado"] else "Desconectado")
+    st.write("Broker:", MQTT_BROKER)
+    st.write("Porta:", MQTT_PORT)
+    st.write("Tópico configurado no dashboard:", MQTT_TOPIC)
+    st.write("Quantidade de mensagens recebidas:", snapshot["qtd_mensagens"])
+    st.write("Último tópico recebido:", snapshot["ultimo_topico"] or "Nenhum")
+    st.write("Último recebimento:", snapshot["ultimo_recebimento"] or "Nenhum")
+
+    if snapshot["erro"]:
+        st.error(snapshot["erro"])
+
+    if payload:
+        st.success("Payload recebido pelo dashboard.")
+        st.json(payload)
+    else:
+        st.warning("Nenhum payload recebido ainda pelo dashboard.")
+
 
 col1, col2 = st.columns(2)
 
