@@ -71,7 +71,7 @@ MQTT_TOPIC = str(ler_secret_mqtt("topico", "next/linha290/gps")).strip()
 MQTT_USUARIO = str(ler_secret_mqtt("usuario", "")).strip()
 MQTT_SENHA = str(ler_secret_mqtt("senha", "")).strip()
 
-INTERVALO_ATUALIZACAO = 3
+INTERVALO_ATUALIZACAO = 1
 
 
 # ============================================================
