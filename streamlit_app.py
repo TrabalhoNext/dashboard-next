@@ -24,8 +24,8 @@ st.set_page_config(
 )
 
 PARADA_FIXA = "Fatec São Bernardo do Campo - Adib Moisés Dib"
-LATITUDE_FIXA = -23.69579
-LONGITUDE_FIXA = -46.54645
+LATITUDE_FIXA = "-23.69579"
+LONGITUDE_FIXA = "-46.54645"
 
 INTERVALO_ATUALIZACAO = 3
 
