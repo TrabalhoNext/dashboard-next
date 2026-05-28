@@ -130,8 +130,7 @@ def montar_parada():
 
 
 def montar_coordenadas():
-    return f"Latitude: {LATITUDE_FIXA:.5f}\nLongitude: {LONGITUDE_FIXA:.5f}"
-
+    return f"Latitude: {LATITUDE_FIXA}\nLongitude: {LONGITUDE_FIXA}"
 
 def montar_data_hora():
     agora = agora_sao_paulo()
